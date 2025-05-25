@@ -5,7 +5,10 @@ import asyncio
 from typing import Dict, List, Any
 import math
 
+'''
+质量评估主要使用了三个主要的指标：完整性、一致性和相关性
 
+'''
 class DataQualityAssessor:
     """数据质量评估器"""
     
@@ -45,7 +48,7 @@ class DataQualityAssessor:
             "issues": issues,
             "recommendation": recommendation
         }
-    
+
     def _assess_completeness(self, data: str) -> float:
         """评估数据完整性"""
         score = 0.0
