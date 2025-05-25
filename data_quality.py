@@ -7,7 +7,8 @@ import math
 
 '''
 质量评估主要使用了三个主要的指标：完整性、一致性和相关性
-
+利用图谱世界知识判断常识性问题
+RAG
 '''
 class DataQualityAssessor:
     """数据质量评估器"""

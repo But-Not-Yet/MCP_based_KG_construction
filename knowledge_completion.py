@@ -2,17 +2,201 @@
 
 import asyncio
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Protocol
+from abc import ABC, abstractmethod
+
+
+class KnowledgeBase(Protocol):
+    """知识库接口协议"""
+
+    async def query_fact(self, entity: str, relation: str, context: str = "") -> Optional[str]:
+        """
+        查询事实信息
+
+        Args:
+            entity: 实体名称
+            relation: 关系类型（如 "location", "country", "capital"）
+            context: 上下文信息
+
+        Returns:
+            查询结果，如果没有找到返回None
+        """
+        ...
+
+    async def verify_fact(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        """
+        验证事实的正确性
+
+        Args:
+            subject: 主语
+            predicate: 谓语/关系
+            object: 宾语
+
+        Returns:
+            验证结果，包含is_correct, confidence, correct_value等字段
+        """
+        ...
+
+
+class ConflictResolver:
+    """语义冲突解决器"""
+
+    def __init__(self, knowledge_base: Optional[KnowledgeBase] = None):
+        self.knowledge_base = knowledge_base or DefaultKnowledgeBase()
+
+    async def resolve_conflicts(self, data: str, issues: List[str]) -> tuple[str, List[str]]:
+        """
+        解决语义冲突
+
+        Args:
+            data: 原始数据
+            issues: 检测到的问题列表
+
+        Returns:
+            (修正后的数据, 修正说明列表)
+        """
+        enhanced_data = data
+        corrections = []
+
+        for issue in issues:
+            if "冲突" in issue:
+                correction_result = await self._resolve_single_conflict(enhanced_data, issue)
+                if correction_result:
+                    enhanced_data = correction_result["corrected_data"]
+                    corrections.append(correction_result["correction_message"])
+
+        return enhanced_data, corrections
+
+    async def _resolve_single_conflict(self, data: str, issue: str) -> Optional[Dict[str, str]]:
+        """解决单个冲突"""
+        # 解析冲突类型和涉及的实体
+        conflict_info = self._parse_conflict_issue(issue)
+        if not conflict_info:
+            return None
+
+        # 使用知识库验证和修正
+        verification = await self.knowledge_base.verify_fact(
+            conflict_info["subject"],
+            conflict_info["predicate"],
+            conflict_info["object"]
+        )
+
+        if not verification["is_correct"] and verification["correct_value"]:
+            # 执行修正
+            corrected_data = self._apply_correction(
+                data,
+                conflict_info,
+                verification["correct_value"]
+            )
+
+            return {
+                "corrected_data": corrected_data,
+                "correction_message": f"修正{conflict_info['conflict_type']}：{verification['correction_message']}"
+            }
+
+        return None
+
+    def _parse_conflict_issue(self, issue: str) -> Optional[Dict[str, str]]:
+        """解析冲突问题描述"""
+        # 地理冲突模式
+        if "巴黎" in issue and "德国" in issue:
+            return {
+                "conflict_type": "地理错误",
+                "subject": "巴黎",
+                "predicate": "位于",
+                "object": "德国"
+            }
+        elif "北京" in issue and "日本" in issue:
+            return {
+                "conflict_type": "地理错误",
+                "subject": "北京",
+                "predicate": "位于",
+                "object": "日本"
+            }
+
+        return None
+
+    def _apply_correction(self, data: str, conflict_info: Dict[str, str], correct_value: str) -> str:
+        """应用修正"""
+        corrected_data = data
+        subject = conflict_info["subject"]
+        incorrect_object = conflict_info["object"]
+
+        # 替换错误的表述
+        patterns_to_fix = [
+            f"{subject}是{incorrect_object}城市",
+            f"{incorrect_object}{subject}",
+            f"{subject}位于{incorrect_object}",
+            f"{subject}在{incorrect_object}"
+        ]
+
+        correct_patterns = [
+            f"{subject}是{correct_value}城市",
+            f"{correct_value}{subject}",
+            f"{subject}位于{correct_value}",
+            f"{subject}在{correct_value}"
+        ]
+
+        for i, pattern in enumerate(patterns_to_fix):
+            if pattern in corrected_data:
+                corrected_data = corrected_data.replace(pattern, correct_patterns[i])
+
+        return corrected_data
+
+
+class DefaultKnowledgeBase:
+    """默认知识库实现"""
+
+    def __init__(self):
+        # 基础地理知识
+        self.geographic_facts = {
+            "巴黎": {"country": "法国", "continent": "欧洲"},
+            "北京": {"country": "中国", "continent": "亚洲"},
+            "东京": {"country": "日本", "continent": "亚洲"},
+            "伦敦": {"country": "英国", "continent": "欧洲"},
+            "纽约": {"country": "美国", "continent": "北美洲"},
+            "柏林": {"country": "德国", "continent": "欧洲"}
+        }
+
+    async def query_fact(self, entity: str, relation: str, context: str = "") -> Optional[str]:
+        """查询事实信息"""
+        if relation == "country" and entity in self.geographic_facts:
+            return self.geographic_facts[entity]["country"]
+        elif relation == "continent" and entity in self.geographic_facts:
+            return self.geographic_facts[entity]["continent"]
+        return None
+
+    async def verify_fact(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        """验证事实正确性"""
+        if predicate in ["位于", "在", "属于"] and subject in self.geographic_facts:
+            correct_country = self.geographic_facts[subject]["country"]
+            is_correct = (object == correct_country)
+
+            return {
+                "is_correct": is_correct,
+                "confidence": 0.95,
+                "correct_value": correct_country if not is_correct else object,
+                "correction_message": f"{subject}属于{correct_country}，不是{object}" if not is_correct else ""
+            }
+
+        # 默认情况：无法验证
+        return {
+            "is_correct": True,  # 保守策略：如果不确定就不修改
+            "confidence": 0.1,
+            "correct_value": None,
+            "correction_message": ""
+        }
 
 
 class KnowledgeCompletor:
-    """知识补全器 - 预留接口，可以集成论文中的知识补全模型"""
+    """知识补全，预留接口，集成论文中的知识补全模型"""
 
-    def __init__(self):
-        # 预留：可以在这里初始化知识补全模型
+    def __init__(self, knowledge_base: Optional[KnowledgeBase] = None):
+        # 在这里初始化知识补全模型
         # self.completion_model = load_completion_model()
         # self.external_kb = load_external_knowledge_base()
-        pass
+        self.conflict_resolver = ConflictResolver(knowledge_base)
+        self.knowledge_base = knowledge_base or DefaultKnowledgeBase()
 
     async def complete_knowledge(self, raw_data: str, quality_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -71,9 +255,6 @@ class KnowledgeCompletor:
         enhanced_data = data
         completions = []
 
-        # 移除硬编码的补全逻辑，避免添加不相关信息
-        # 只在真正需要时进行最小化的补全
-
         # 预留：这里可以调用外部知识库或模型进行更复杂的实体补全
         # enhanced_data, model_completions = await self._model_based_entity_completion(data)
         # completions.extend(model_completions)
@@ -91,22 +272,8 @@ class KnowledgeCompletor:
         return enhanced_data, completions
 
     async def _correct_conflicts(self, data: str, issues: List[str]) -> tuple[str, List[str]]:
-        """修正语义冲突"""
-        enhanced_data = data
-        corrections = []
-
-        for issue in issues:
-            if "巴黎" in issue and "德国" in issue:
-                enhanced_data = enhanced_data.replace("巴黎是德国城市", "巴黎是法国城市")
-                enhanced_data = enhanced_data.replace("德国巴黎", "法国巴黎")
-                corrections.append("修正地理错误：巴黎属于法国，不是德国")
-
-            if "北京" in issue and "日本" in issue:
-                enhanced_data = enhanced_data.replace("北京是日本城市", "北京是中国城市")
-                enhanced_data = enhanced_data.replace("日本北京", "中国北京")
-                corrections.append("修正地理错误：北京属于中国，不是日本")
-
-        return enhanced_data, corrections
+        """修正语义冲突 - 使用可配置的冲突解决器"""
+        return await self.conflict_resolver.resolve_conflicts(data, issues)
 
     async def _normalize_format(self, data: str) -> tuple[str, List[str]]:
         """格式规范化"""
@@ -130,10 +297,7 @@ class KnowledgeCompletor:
         implicit_knowledge = []
 
         # 预留：这里可以集成论文中的隐性知识推理模型
-        # 例如：
-        # - 基于大语言模型的知识推理
-        # - 基于知识图谱的路径推理
-        # - 基于规则的逻辑推理
+
 
         # 简化示例：基于常识的推理
         if "CEO" in data:
@@ -189,11 +353,93 @@ class KnowledgeCompletor:
         # 3. 专门的知识补全模型
         pass
 
-    async def _external_kb_query(self, entity: str) -> Dict[str, Any]:
-        """外部知识库查询 - 预留接口"""
-        # 这里可以集成：
-        # 1. Wikidata
-        # 2. DBpedia
-        # 3. 企业内部知识库
-        # 4. 领域专用知识库
+    async def _external_kb_query(self, entity: str, relation: str = "general", context: str = "") -> Optional[str]:
+        """外部知识库查询 - 使用可配置的知识库接口"""
+        # 使用配置的知识库进行查询
+        result = await self.knowledge_base.query_fact(entity, relation, context)
+        return result
+
+    async def _verify_fact_with_kb(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        """使用知识库验证事实"""
+        return await self.knowledge_base.verify_fact(subject, predicate, object)
+
+
+# 扩展知识库示例
+class WikidataKnowledgeBase:
+    """Wikidata知识库接口示例 - 预留实现"""
+
+    async def query_fact(self, entity: str, relation: str, context: str = "") -> Optional[str]:
+        """
+        查询Wikidata中的事实信息
+        实际实现中可以调用Wikidata API
+        """
+        # 预留：实际实现中调用Wikidata SPARQL API
+        # sparql_query = f"SELECT ?value WHERE {{ ?entity rdfs:label '{entity}'@zh . ?entity {relation} ?value . }}"
+        # result = await self._execute_sparql_query(sparql_query)
+        # return result
         pass
+
+    async def verify_fact(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        """验证事实正确性"""
+        # 预留：实际实现中查询Wikidata验证事实
+        pass
+
+
+class LLMKnowledgeBase:
+    """基于大语言模型的知识库示例 - 预留实现"""
+
+    def __init__(self, llm_client=None):
+        self.llm_client = llm_client
+
+    async def query_fact(self, entity: str, relation: str, context: str = "") -> Optional[str]:
+        """
+        使用LLM查询事实信息
+        """
+        # 预留：实际实现中调用LLM API
+        # prompt = f"请回答关于{entity}的{relation}信息。上下文：{context}"
+        # response = await self.llm_client.complete(prompt)
+        # return self._extract_fact_from_response(response)
+        pass
+
+    async def verify_fact(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        """使用LLM验证事实正确性"""
+        # 预留：实际实现中使用LLM进行事实验证
+        pass
+
+
+# 使用示例
+"""
+# 1. 使用默认知识库
+completor = KnowledgeCompletor()
+
+# 2. 使用自定义知识库
+custom_kb = WikidataKnowledgeBase()
+completor = KnowledgeCompletor(knowledge_base=custom_kb)
+
+# 3. 使用LLM知识库
+llm_kb = LLMKnowledgeBase(llm_client=your_llm_client)
+completor = KnowledgeCompletor(knowledge_base=llm_kb)
+
+# 4. 组合多个知识库
+class CombinedKnowledgeBase:
+    def __init__(self, primary_kb, fallback_kb):
+        self.primary_kb = primary_kb
+        self.fallback_kb = fallback_kb
+
+    async def query_fact(self, entity: str, relation: str, context: str = "") -> Optional[str]:
+        result = await self.primary_kb.query_fact(entity, relation, context)
+        if result is None:
+            result = await self.fallback_kb.query_fact(entity, relation, context)
+        return result
+
+    async def verify_fact(self, subject: str, predicate: str, object: str) -> Dict[str, Any]:
+        result = await self.primary_kb.verify_fact(subject, predicate, object)
+        if result["confidence"] < 0.5:
+            fallback_result = await self.fallback_kb.verify_fact(subject, predicate, object)
+            if fallback_result["confidence"] > result["confidence"]:
+                return fallback_result
+        return result
+
+combined_kb = CombinedKnowledgeBase(WikidataKnowledgeBase(), DefaultKnowledgeBase())
+completor = KnowledgeCompletor(knowledge_base=combined_kb)
+"""
