@@ -88,17 +88,57 @@ uv run kg_server.py
 
 The server will start and listen for MCP client connections.
 
-### 4. Run the Client
+### 4. Running Tests
 
-In a new terminal:
+There are three ways to test the system:
 
+#### a. Using MCP Inspector
 ```bash
-# Interactive mode
-uv run kg_client.py
-
-# Batch mode
-uv run kg_client.py "北京大学是中国著名的高等教育机构" "苹果公司的CEO是蒂姆·库克"
+npx -y @modelcontextprotocol/inspector uv run kg_server.py
 ```
+After running this command, click the link that appears after "MCP Inspector is up and running at" to open the MCP Inspector in your browser. Once opened:
+1. Click "Connect"
+2. Select "Tools" from the top menu
+3. Choose "build_knowledge_graph" from the list tools
+4. Enter your text in the left panel to generate the knowledge graph
+
+![MCP Inspector](./demo_images/1.png "MCP Inspector")
+
+#### b. Using Client Code
+```bash
+uv run kg_client.py
+```
+After the connection is successful, enter your text to view the results.
+
+![Client Code Execution](./demo_images/2.png "Client Code Execution")
+
+#### c. Using Mainstream MCP Tools (Cursor, Cherry Studio, etc.)
+Example: Running in Cherry Studio
+
+In settings, select MCP servers, click "Add Server" (import from JSON). Here's the configuration JSON (make sure to modify the local path):
+
+```json
+{
+  "mcpServers": {
+    "kg_server": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "D:/mcp_getting_started",
+        "run",
+        "kg_server.py"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+After enabling this MCP server, you can use it in Cherry Studio.
+
+![Using in Cherry Studio](./demo_images/3.png "Using in Cherry Studio")
 
 ## 🛠️ Usage Guide
 
@@ -269,8 +309,14 @@ The system exposes the following MCP tools for integration:
 ## 🚀 Development
 
 ### Running Tests
+
+Refer to the "Running Tests" section above for three different testing methods:
+- MCP Inspector (recommended for visual testing)
+- Client code (for programmatic testing)
+- Mainstream MCP tools (for integration testing)
+
 ```bash
-# Run the demonstration examples
+# Quick test with demonstration examples
 uv run kg_client.py
 # Then type: demo
 
@@ -308,6 +354,27 @@ VISUALIZATION_HEIGHT=800       # HTML visualization height
 3. Make your changes and test thoroughly
 4. Submit a pull request with detailed description
 
+## 🆘 Troubleshooting
+
+### Common Issues
+
+1. **Port Occupation Error**
+   ```bash
+   # Find process using the port
+   netstat -ano | findstr :6277
+   # Kill the process
+   taskkill /PID <process_id> /F
+   ```
+
+2. **API Balance Insufficient**
+   - Check API configuration in `.env` file
+   - Ensure API account has sufficient balance
+
+3. **Dependency Installation Issues**
+   ```bash
+   uv sync --reinstall
+   ```
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -327,5 +394,3 @@ For questions, issues, or contributions:
 - 📖 Documentation: See `KNOWLEDGE_GRAPH_README.md` for detailed technical documentation
 
 ---
-
-**Happy Knowledge Graph Building! 🎉**
