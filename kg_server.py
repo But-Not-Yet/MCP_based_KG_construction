@@ -11,6 +11,11 @@ import time
 import sys
 import os
 from typing import Any, Sequence
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
+
 
 # 设置控制台编码
 if sys.platform == "win32":
@@ -39,7 +44,7 @@ from kg_visualizer import KnowledgeGraphVisualizer
 # 全局组件
 quality_assessor = DataQualityAssessor()
 knowledge_completor = KnowledgeCompletor()
-kg_builder = KnowledgeGraphBuilder()
+kg_builder = KnowledgeGraphBuilder(api_key=os.getenv("OPENAI_API_KEY"))
 kg_visualizer = KnowledgeGraphVisualizer()
 
 # 创建服务器实例
