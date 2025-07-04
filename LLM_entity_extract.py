@@ -8,7 +8,7 @@ class ChineseEntityRelationExtractor:
     def __init__(self, api_key):
         self.api_key = api_key
         self.base_url = "https://api.siliconflow.cn/v1/chat/completions"
-        self.model = "Qwen/Qwen2.5-7B-Instruct"  # 使用免费的中文模型
+        self.model = "deepseek-ai/DeepSeek-R1"  # 使用中文模型
         
     def call_api(self, prompt):
         """调用Silicon Flow API"""

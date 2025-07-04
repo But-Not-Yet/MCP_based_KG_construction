@@ -45,6 +45,7 @@ class EntityDetailAnalyzer:
                 entity_type="Person",
                 required_attributes=["姓名", "性别"],
                 optional_attributes=["年龄", "职业", "出生地", "教育背景", "工作单位"],
+
                 attribute_patterns={
                     "年龄": r"(\d{1,3})[岁|周岁]",
                     "职业": r"(CEO|总裁|经理|主任|教授|医生|工程师)",
