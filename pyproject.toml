@@ -16,4 +16,6 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "requests>=2.31.0",
+    "scipy>=1.16.0",
+    "jieba>=0.42.1",
 ]

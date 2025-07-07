@@ -61,6 +61,7 @@ class GlobalAnalyzer:
         
     def _load_verb_keywords(self) -> Set[str]:
         """加载动词关键词"""
+        '''解决硬编码问题'''
         return {
             '进行', '执行', '实现', '完成', '处理', '分析', '计算', '生成',
             '创建', '建立', '构建', '开发', '设计', '制作', '产生', '形成',
@@ -452,6 +453,7 @@ class CausalRelationshipAnalyzer:
         causal_overlap = len(cause_keywords & self.parent.causal_keywords) + \
                         len(effect_keywords & self.parent.causal_keywords)
         
+
         # 计算语义相关性
         semantic_score = len(cause_keywords & effect_keywords) / \
                         (len(cause_keywords | effect_keywords) + 1)
