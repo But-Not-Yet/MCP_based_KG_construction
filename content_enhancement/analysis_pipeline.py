@@ -17,8 +17,8 @@ from datetime import datetime
 import logging
 
 # 导入分析模块
-from global_analysis import GlobalAnalyzer, AnalysisResult
-from entity_detail_analyzer import EntityDetailAnalyzer, AttributeGap
+from .global_analysis import GlobalAnalyzer, AnalysisResult
+from .entity_detail_analyzer import EntityDetailAnalyzer, AttributeGap
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)

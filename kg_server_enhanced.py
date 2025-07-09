@@ -342,9 +342,9 @@ async def analyze_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCo
 
         relations = [
             {
-                'name': triple[1],
-                'source': triple[0],
-                'target': triple[2],
+                'name': triple.relation,
+                'source': triple.head,
+                'target': triple.tail,
                 'type': 'unknown'
             }
             for triple in kg_result["triples"]

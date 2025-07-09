@@ -5,6 +5,9 @@ from typing import Dict, List, Any, Set, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+from numpy.f2py.crackfortran import sourcecodeform
+
+
 class AttributeType(Enum):
     """属性类型枚举"""
     BASIC = "基础属性"        # 姓名、类型等
@@ -344,6 +347,15 @@ class EntityDetailAnalyzer:
         end = min(len(text), text.find(entity_name) + len(entity_name) + window)
         return text[start:end]
 
+
+    def _get_entity_score(self, entity_name: str,text: str)->str:
+        """获取实体分数"""
+        start = max(0, text.find(entity_name))
+        end = min(len(text), text.find(entity_name) + len(entity_name))
+        return text[start:end]
+
+
+
     def _classify_attribute_type(self, attribute_name: str) -> AttributeType:
         """分类属性类型"""
         if attribute_name in ["姓名", "名称", "类型"]:
@@ -377,7 +389,10 @@ class EntityDetailAnalyzer:
         # 简化实现：计算两个实体在文本中的距离
         pos1 = text.find(entity1)
         pos2 = text.find(entity2)
-        
+
+
+
+
         if pos1 == -1 or pos2 == -1:
             return 0.0
         
