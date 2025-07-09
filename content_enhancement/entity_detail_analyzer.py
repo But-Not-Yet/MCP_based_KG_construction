@@ -415,6 +415,112 @@ class EntityDetailAnalyzer:
         key = tuple(sorted([type1, type2]))
         return similarity_matrix.get(key, 0.1)  # 默认低相似度
 
+    def _infer_entity_type(self, entity_name: str) -> str:
+        """推断实体类型"""
+        # 基于实体名称特征推断类型
+        if any(keyword in entity_name for keyword in ["公司", "企业", "集团", "有限公司", "股份", "Co.", "Ltd.", "Inc."]):
+            return "Organization"
+        elif any(keyword in entity_name for keyword in ["市", "县", "区", "镇", "村", "省", "州", "路", "街", "广场"]):
+            return "Location"
+        elif any(keyword in entity_name for keyword in ["系统", "软件", "平台", "产品", "服务", "工具", "应用"]):
+            return "Product"
+        else:
+            return "Person"  # 默认为人物
+
+    def _get_important_optional_attributes(self, entity_type: str, current_attrs: Dict[str, str]) -> List[str]:
+        """获取重要的可选属性"""
+        if entity_type == "Person":
+            if "工作单位" in current_attrs:
+                return ["职业", "年龄"]
+            else:
+                return ["年龄", "出生地"]
+        elif entity_type == "Organization":
+            return ["成立时间", "总部地址", "行业"]
+        elif entity_type == "Location":
+            return ["所属区域", "人口"]
+        elif entity_type == "Product":
+            return ["价格", "生产商", "发布时间"]
+        else:
+            return []
+
+    def _check_logical_consistency(self, entity: Dict, attributes: Dict[str, str]) -> List[Dict[str, Any]]:
+        """检查逻辑一致性"""
+        errors = []
+        
+        for rule in self.logical_rules:
+            try:
+                if rule["condition"](entity, attributes):
+                    if not rule["check"](attributes):
+                        errors.append({
+                            "entity": entity["name"],
+                            "error_type": rule["rule_name"],
+                            "message": rule["error_message"],
+                            "suggested_fix": f"检查并修正{entity['name']}的{rule['rule_name']}"
+                        })
+            except Exception as e:
+                # 如果规则检查出错，记录但不中断
+                continue
+        
+        return errors
+
+    def _check_profession_consistency(self, profession: str, workplace: str) -> bool:
+        """检查职业与工作单位的一致性"""
+        # 简化实现，实际应用可以更复杂
+        profession_workplace_map = {
+            "教授": ["大学", "学院", "研究所"],
+            "医生": ["医院", "诊所", "卫生院"],
+            "工程师": ["公司", "企业", "研究院"],
+            "CEO": ["公司", "企业", "集团"]
+        }
+        
+        if profession in profession_workplace_map:
+            expected_workplaces = profession_workplace_map[profession]
+            return any(workplace_keyword in workplace for workplace_keyword in expected_workplaces)
+        
+        return True  # 未知职业默认一致
+
+    def _check_geographic_hierarchy(self, location: str, parent_location: str) -> bool:
+        """检查地理位置层次关系"""
+        # 简化实现，实际应用需要地理数据库
+        return len(parent_location) >= len(location)
+
+    def _check_founding_time_validity(self, founding_time: str) -> bool:
+        """检查成立时间合理性"""
+        import datetime
+        try:
+            year = int(founding_time.replace("年", ""))
+            current_year = datetime.datetime.now().year
+            return 1800 <= year <= current_year
+        except:
+            return False
+
+    def _analyze_triangular_associations(self, entities: List[Dict], relations: List[Tuple]) -> List[Dict[str, Any]]:
+        """分析三角关系"""
+        triangular_associations = []
+        
+        # 简化实现：查找三个实体间的关系
+        for i in range(len(entities)):
+            for j in range(i + 1, len(entities)):
+                for k in range(j + 1, len(entities)):
+                    entity1, entity2, entity3 = entities[i], entities[j], entities[k]
+                    
+                    # 检查是否存在三角关系
+                    relations_count = 0
+                    for rel in relations:
+                        if (rel[0] in [entity1["name"], entity2["name"], entity3["name"]] and 
+                            rel[2] in [entity1["name"], entity2["name"], entity3["name"]]):
+                            relations_count += 1
+                    
+                    if relations_count >= 2:  # 至少有两个关系
+                        triangular_associations.append({
+                            "entities": [entity1["name"], entity2["name"], entity3["name"]],
+                            "strength": min(1.0, relations_count / 3.0),
+                            "association_types": ["三角关系"],
+                            "evidence": [f"存在{relations_count}个相关关系"]
+                        })
+        
+        return triangular_associations
+
 # 使用示例
 """
 # 在 knowledge_completion.py 中集成

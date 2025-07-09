@@ -44,15 +44,26 @@ from kg_visualizer import KnowledgeGraphVisualizer
 try:
     from content_enhancement.analysis_pipeline import analyze_knowledge_graph, AnalysisConfig
     ANALYSIS_AVAILABLE = True
-except ImportError:
+    print("✅ 分析模块加载成功")
+except ImportError as e:
     ANALYSIS_AVAILABLE = False
-    print("分析模块未找到，高级分析功能将不可用")
+    print(f"❌ 分析模块加载失败: {e}")
+    print("高级分析功能将不可用")
+except Exception as e:
+    ANALYSIS_AVAILABLE = False
+    print(f"❌ 分析模块初始化错误: {e}")
+    print("高级分析功能将不可用")
 
 # 全局组件
-quality_assessor = DataQualityAssessor()
-knowledge_completor = KnowledgeCompletor()
-kg_builder = KnowledgeGraphBuilder(api_key=os.getenv("OPENAI_API_KEY"))
-kg_visualizer = KnowledgeGraphVisualizer()
+try:
+    quality_assessor = DataQualityAssessor()
+    knowledge_completor = KnowledgeCompletor()
+    kg_builder = KnowledgeGraphBuilder(api_key=os.getenv("OPENAI_API_KEY"))
+    kg_visualizer = KnowledgeGraphVisualizer()
+    print("✅ 核心组件初始化成功")
+except Exception as e:
+    print(f"❌ 核心组件初始化失败: {e}")
+    raise
 
 # 创建服务器实例
 server = Server("knowledge-graph-builder-enhanced")
@@ -494,20 +505,39 @@ async def main():
     print("🚀 启动知识图谱构建服务器（增强版）")
     print(f"🔧 高级分析功能: {'✅ 可用' if ANALYSIS_AVAILABLE else '❌ 不可用'}")
     
-    # 使用 stdio 传输运行服务器
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="knowledge-graph-builder-enhanced",
-                server_version="2.0.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={}
+    try:
+        # 确保所有组件都正常初始化
+        print("🔧 验证组件状态...")
+        if not hasattr(quality_assessor, 'assess_quality'):
+            raise RuntimeError("质量评估器未正确初始化")
+        if not hasattr(kg_builder, 'build_graph'):
+            raise RuntimeError("知识图谱构建器未正确初始化")
+        print("✅ 所有组件验证通过")
+        
+        # 使用 stdio 传输运行服务器
+        print("🔗 启动MCP服务器...")
+        async with stdio_server() as (read_stream, write_stream):
+            # 添加初始化延迟确保所有组件就绪
+            await asyncio.sleep(0.1)
+            
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name="knowledge-graph-builder-enhanced",
+                    server_version="2.0.0",
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={}
+                    ),
                 ),
-            ),
-        )
+            )
+            
+    except Exception as e:
+        print(f"❌ 服务器启动失败: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":
