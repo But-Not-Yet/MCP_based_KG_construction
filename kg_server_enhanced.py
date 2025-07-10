@@ -43,6 +43,7 @@ from kg_visualizer import KnowledgeGraphVisualizer
 # 新增分析模块
 try:
     from content_enhancement.analysis_pipeline import analyze_knowledge_graph, AnalysisConfig
+    from content_enhancement.enhancement_executor import EnhancementExecutor
     ANALYSIS_AVAILABLE = True
     print("✅ 分析模块加载成功")
 except ImportError as e:
@@ -60,6 +61,8 @@ try:
     knowledge_completor = KnowledgeCompletor()
     kg_builder = KnowledgeGraphBuilder(api_key=os.getenv("OPENAI_API_KEY"))
     kg_visualizer = KnowledgeGraphVisualizer()
+    if ANALYSIS_AVAILABLE:
+        enhancement_executor = EnhancementExecutor()
     print("✅ 核心组件初始化成功")
 except Exception as e:
     print(f"❌ 核心组件初始化失败: {e}")
@@ -138,7 +141,7 @@ async def handle_list_tools() -> list[Tool]:
         tools.append(
             Tool(
                 name="build_and_analyze_kg",
-                description="构建知识图谱并进行高级分析：结合构建和分析功能的一体化工具",
+                description="构建知识图谱并进行高级分析：结合构建和分析功能的一体化工具，支持自动增强",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -149,11 +152,16 @@ async def handle_list_tools() -> list[Tool]:
                         "output_file": {
                             "type": "string",
                             "description": "可视化输出文件名（可选）",
-                            "default": "knowledge_graph.html"
+                            "default": "enhanced_knowledge_graph.html"
                         },
                         "enable_analysis": {
                             "type": "boolean",
                             "description": "启用高级分析",
+                            "default": True
+                        },
+                        "auto_enhance": {
+                            "type": "boolean",
+                            "description": "是否自动增强知识图谱",
                             "default": True
                         }
                     },
@@ -423,12 +431,13 @@ async def analyze_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCo
 
 async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextContent]:
     """
-    一体化工具：构建知识图谱并进行高级分析
+    一体化工具：构建知识图谱、分析、自动增强并生成可视化
     """
     try:
         text = arguments.get("text", "")
-        output_file = arguments.get("output_file", "knowledge_graph.html")
+        output_file = arguments.get("output_file", "enhanced_knowledge_graph.html")
         enable_analysis = arguments.get("enable_analysis", True)
+        auto_enhance = arguments.get("auto_enhance", True)
 
         if not text.strip():
             return [TextContent(
@@ -441,42 +450,177 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
 
         start_time = time.time()
 
-        # 首先执行原有的构建流程
-        build_result = await build_knowledge_graph_tool(arguments)
-        build_data = json.loads(build_result[0].text)
+        # 阶段1：数据质量评估
+        quality_result = await quality_assessor.assess_quality(text)
 
-        if not build_data["success"]:
-            return build_result
+        # 阶段2：知识补全（如果需要）
+        processed_text = text
+        completion_info = {"skipped": True, "reason": "数据质量良好"}
 
-        # 如果启用分析，执行高级分析
-        analysis_data = None
-        if enable_analysis:
-            analysis_arguments = {
-                "text": text,
-                "enable_global_analysis": True,
-                "enable_detail_analysis": True,
-                "similarity_threshold": 0.3,
-                "max_recommendations": 10
+        if not quality_result["is_high_quality"]:
+            completion_result = await knowledge_completor.complete_knowledge(text, quality_result)
+            processed_text = completion_result["enhanced_data"]
+            completion_info = {
+                "skipped": False,
+                "completions": completion_result["completions"],
+                "corrections": completion_result["corrections"],
+                "confidence": completion_result["confidence"]
             }
-            analysis_result = await analyze_knowledge_graph_tool(analysis_arguments)
-            analysis_data = json.loads(analysis_result[0].text)
+
+        # 阶段3：知识图谱构建
+        kg_result = await kg_builder.build_graph(processed_text, use_llm=True)
+
+        if not kg_result["entities"] and not kg_result["triples"]:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "无法从输入文本中提取到有效的实体或关系"
+                }, ensure_ascii=False, indent=2)
+            )]
+
+        # 阶段4：高级分析（如果启用）
+        analysis_result = None
+        if enable_analysis:
+            # 转换数据格式用于分析
+            entities = [
+                {
+                    'name': entity,
+                    'type': 'unknown',
+                    'attributes': {},
+                    'relations': []
+                }
+                for entity in kg_result["entities"]
+            ]
+
+            relations = [
+                {
+                    'name': triple.relation,
+                    'source': triple.head,
+                    'target': triple.tail,
+                    'type': 'unknown'
+                }
+                for triple in kg_result["triples"]
+            ]
+
+            # 配置分析参数
+            config = AnalysisConfig(
+                enable_global_analysis=True,
+                enable_detail_analysis=True,
+                similarity_threshold=0.3,
+                max_recommendations=10
+            )
+
+            # 执行高级分析
+            analysis_result = await analyze_knowledge_graph(
+                processed_text, entities, relations, config
+            )
+
+        # 阶段5：自动增强（如果启用）
+        enhancement_result = None
+        final_entities = kg_result["entities"]
+        final_relations = kg_result["relations"]
+        final_triples = kg_result["triples"]
+
+        if auto_enhance and analysis_result:
+            enhancement_result = await enhancement_executor.execute_enhancements(
+                processed_text, kg_result["entities"], kg_result["relations"], kg_result["triples"], analysis_result
+            )
+
+            # 使用增强后的数据
+            final_entities = [e['name'] for e in enhancement_result.enhanced_entities]
+            final_relations = [r['name'] for r in enhancement_result.enhanced_relations]
+
+            # 构建增强后的三元组用于可视化
+            enhanced_triples = []
+            for triple_dict in enhancement_result.enhanced_triples:
+                from kg_utils import Triple
+                enhanced_triple = Triple(
+                    head=triple_dict['head'],
+                    relation=triple_dict['relation'],
+                    tail=triple_dict['tail'],
+                    confidence=triple_dict.get('confidence', 0.8)
+                )
+                enhanced_triples.append(enhanced_triple)
+
+            final_triples = enhanced_triples
+
+        # 阶段6：生成可视化
+        visualization_file = kg_visualizer.save_simple_visualization(
+            final_triples,
+            final_entities,
+            final_relations,
+            output_file
+        )
+
+        abs_path = os.path.abspath(visualization_file)
+        visualization_url = f"file:///{abs_path.replace(os.sep, '/')}"
+        http_url = f"http://localhost:8000/{visualization_file}"
 
         processing_time = time.time() - start_time
 
-        # 整合结果
+        # 构建结果
         result = {
             "success": True,
             "input_text": text,
             "processing_time": round(processing_time, 3),
-            "knowledge_graph_construction": build_data,
-            "advanced_analysis": analysis_data if analysis_data and analysis_data["success"] else None,
+            "stages": {
+                "quality_assessment": {
+                    "quality_score": quality_result["quality_score"],
+                    "is_high_quality": quality_result["is_high_quality"],
+                    "completeness": quality_result["completeness"],
+                    "consistency": quality_result["consistency"],
+                    "relevance": quality_result["relevance"],
+                    "issues": quality_result["issues"],
+                    "recommendation": quality_result["recommendation"]
+                },
+                "knowledge_completion": completion_info,
+                "original_knowledge_graph": {
+                    "entities_count": len(kg_result["entities"]),
+                    "relations_count": len(kg_result["relations"]),
+                    "triples_count": len(kg_result["triples"]),
+                    "entities": kg_result["entities"],
+                    "relations": kg_result["relations"],
+                    "average_confidence": sum(kg_result["confidence_scores"]) / len(kg_result["confidence_scores"]) if kg_result["confidence_scores"] else 0
+                },
+                "analysis_results": {
+                    "analysis_enabled": enable_analysis,
+                    "analysis_performed": analysis_result is not None,
+                    "timestamp": analysis_result.timestamp if analysis_result else None,
+                    "quality_score": analysis_result.quality_metrics.get('overall_score', 0) if analysis_result else None,
+                    "total_issues": analysis_result.quality_metrics.get('issue_count', 0) if analysis_result else 0,
+                    "critical_issues": analysis_result.quality_metrics.get('critical_issues', 0) if analysis_result else 0,
+                    "recommendations_count": len(analysis_result.integrated_recommendations) if analysis_result else 0,
+                    "top_recommendations": analysis_result.integrated_recommendations[:5] if analysis_result else []
+                },
+                "enhancement_results": {
+                    "auto_enhance_enabled": auto_enhance,
+                    "enhancement_applied": enhancement_result is not None,
+                    "enhancement_summary": enhancement_result.enhancement_summary if enhancement_result else None,
+                    "applied_enhancements": enhancement_result.applied_enhancements if enhancement_result else [],
+                    "final_entities_count": len(final_entities),
+                    "final_relations_count": len(final_relations),
+                    "final_triples_count": len(final_triples)
+                },
+                "visualization": {
+                    "file_path": visualization_file,
+                    "file_url": visualization_url,
+                    "http_url": http_url,
+                    "server_info": f"可手动启动HTTP服务器访问：在项目目录运行 'python -m http.server 8000'，然后访问 {http_url}"
+                }
+            },
             "summary": {
-                "construction_successful": build_data["success"],
-                "analysis_successful": analysis_data["success"] if analysis_data else False,
-                "entities_count": build_data["stages"]["knowledge_graph"]["entities_count"],
-                "quality_score": analysis_data["analysis_results"]["quality_score"] if analysis_data and analysis_data["success"] else None,
-                "recommendations_count": analysis_data["analysis_results"]["recommendations_count"] if analysis_data and analysis_data["success"] else 0,
-                "visualization_file": build_data["stages"]["visualization"]["file_path"]
+                "original_text": text,
+                "processed_text": processed_text,
+                "quality_improved": not quality_result["is_high_quality"],
+                "analysis_performed": analysis_result is not None,
+                "enhancement_applied": enhancement_result is not None,
+                "final_entities": len(final_entities),
+                "final_relations": len(final_relations),
+                "final_triples": len(final_triples),
+                "visualization_ready": True,
+                "visualization_file": visualization_file,
+                "visualization_url": visualization_url
             }
         }
 
@@ -516,28 +660,38 @@ async def main():
         
         # 使用 stdio 传输运行服务器
         print("🔗 启动MCP服务器...")
+        
+        # 创建初始化选项
+        init_options = InitializationOptions(
+            server_name="knowledge-graph-builder-enhanced",
+            server_version="2.0.0",
+            capabilities=server.get_capabilities(
+                notification_options=NotificationOptions(),
+                experimental_capabilities={}
+            ),
+        )
+        
         async with stdio_server() as (read_stream, write_stream):
-            # 添加初始化延迟确保所有组件就绪
-            await asyncio.sleep(0.1)
+            # 确保服务器完全初始化
+            print("⏳ 等待服务器完全初始化...")
+            await asyncio.sleep(0.5)  # 增加延迟确保初始化完成
             
+            print("✅ 开始运行服务器...")
             await server.run(
                 read_stream,
                 write_stream,
-                InitializationOptions(
-                    server_name="knowledge-graph-builder-enhanced",
-                    server_version="2.0.0",
-                    capabilities=server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={}
-                    ),
-                ),
+                init_options,
             )
             
+    except KeyboardInterrupt:
+        print("\n🛑 服务器收到中断信号，正在关闭...")
     except Exception as e:
         print(f"❌ 服务器启动失败: {e}")
         import traceback
         traceback.print_exc()
         raise
+    finally:
+        print("🔚 服务器已关闭")
 
 
 if __name__ == "__main__":
