@@ -1,11 +1,15 @@
 # entity_detail_analyzer.py
 
 import re
-from typing import Dict, List, Any, Set, Tuple
+from typing import Dict, List, Any, Set, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from numpy.f2py.crackfortran import sourcecodeform
+# 引入 LLMClient（若可用）
+try:
+    from .llm_client import LLMClient
+except ImportError:
+    LLMClient = None  # type: ignore
 
 
 class AttributeType(Enum):
@@ -34,13 +38,63 @@ class AttributeGap:
     confidence: float
     suggested_sources: List[str]
 
+# ---------------------------------------------
+# 偏细节分析器主类
+# ---------------------------------------------
+
+
 class EntityDetailAnalyzer:
     """偏细节分析器 - 专注于单实体和小规模组合分析"""
-    
-    def __init__(self):
-        self.attribute_templates = self._init_attribute_templates()
+
+    def __init__(self, llm_client: Optional["LLMClient"] = None):
+        """初始化
+
+        Args:
+            llm_client: 可选的大语言模型客户端，若提供则优先从 LLM 获取属性模板。
+        """
+        self.llm_client = llm_client
+
+        # 尝试从 LLM 获取属性模板，失败则回退到硬编码模板
+        if self.llm_client is not None:
+            llm_templates = self._load_attribute_templates_from_llm()
+            self.attribute_templates = (
+                llm_templates if llm_templates else self._init_attribute_templates()
+            )
+        else:
+            self.attribute_templates = self._init_attribute_templates()
+
+        # TODO: 后续可将逻辑规则也迁移至 LLM
         self.logical_rules = self._init_logical_rules()
-        
+
+    # ------------------------------------------------------------------
+    # LLM 动态加载
+    # ------------------------------------------------------------------
+
+    def _load_attribute_templates_from_llm(self) -> Dict[str, "AttributeTemplate"]:
+        """尝试从 LLM 获取属性模板，如失败返回空 dict"""
+        templates: Dict[str, AttributeTemplate] = {}
+
+        if self.llm_client is None:
+            return templates
+
+        # 可根据场景动态决定需要哪些实体类型；此处采用默认列表
+        default_entity_types = ["Person", "Organization", "Location", "Product"]
+        for etype in default_entity_types:
+            try:
+                tmpl_dict = self.llm_client.get_attribute_template(etype)
+                if tmpl_dict:
+                    templates[etype] = AttributeTemplate(
+                        entity_type=etype,
+                        required_attributes=tmpl_dict.get("required_attributes", []),
+                        optional_attributes=tmpl_dict.get("optional_attributes", []),
+                        attribute_patterns=tmpl_dict.get("attribute_patterns", {}),
+                    )
+            except Exception as exc:  # pylint: disable=broad-except
+                # 若某一实体类型获取失败，记录日志并跳过
+                print(f"⚠️  从 LLM 获取 {etype} 属性模板失败: {exc}")
+
+        return templates
+
     def _init_attribute_templates(self) -> Dict[str, AttributeTemplate]:
         """初始化实体属性模板"""
         return {

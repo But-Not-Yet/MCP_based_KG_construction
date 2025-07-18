@@ -19,6 +19,7 @@ import logging
 # 导入分析模块
 from .global_analysis import GlobalAnalyzer, AnalysisResult
 from .entity_detail_analyzer import EntityDetailAnalyzer, AttributeGap
+from .llm_client import LLMClient
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -54,10 +55,11 @@ class AnalysisOutput:
     """分析输出结果"""
     timestamp: str
     input_summary: Dict[str, Any]
-    global_analysis_results: Optional[Dict[str, AnalysisResult]] = None
+    global_analysis_results: Optional[Dict[str, Any]] = None
     detail_analysis_results: Optional[Dict[str, Any]] = None
     integrated_recommendations: List[Dict[str, Any]] = None
     quality_metrics: Dict[str, float] = None
+    llm_status: str = "UNKNOWN"
 
 
 class AnalysisPipeline:
@@ -65,8 +67,12 @@ class AnalysisPipeline:
     
     def __init__(self, config: AnalysisConfig = None):
         self.config = config or AnalysisConfig()
-        self.global_analyzer = GlobalAnalyzer()
-        self.detail_analyzer = EntityDetailAnalyzer()
+
+        # 初始化 LLMClient，可根据配置/环境变量决定是否启用
+        self.llm_client = LLMClient()
+
+        self.global_analyzer = GlobalAnalyzer(llm_client=self.llm_client)
+        self.detail_analyzer = EntityDetailAnalyzer(llm_client=self.llm_client)
         
         logger.info(f"分析流程控制器初始化完成，配置: {self.config}")
     
@@ -353,7 +359,7 @@ class AnalysisPipeline:
     def _generate_output(self, input_data: InputData, analysis_results: Dict[str, Any], 
                         integrated_results: Dict[str, Any]) -> AnalysisOutput:
         """生成输出结果"""
-        return AnalysisOutput(
+        output = AnalysisOutput(
             timestamp=datetime.now().isoformat(),
             input_summary={
                 'text_length': len(input_data.original_text),
@@ -370,6 +376,12 @@ class AnalysisPipeline:
                 'critical_issues': integrated_results.get('issue_summary', {}).get('critical_issues', 0)
             }
         )
+        
+        # Add LLM status to the output
+        if self.llm_client:
+            output.llm_status = "OPERATIONAL" if self.llm_client.is_operational else "DEGRADED (check API key/environment variables)"
+
+        return output
     
     # 辅助方法
     def _convert_entities_for_global(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

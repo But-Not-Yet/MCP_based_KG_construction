@@ -53,6 +53,27 @@ OPENAI_BASE_URL=https://api.deepseek.com  # 或其他API端点
 OPENAI_MODEL=deepseek-chat
 ```
 
+### 2.1 LLMClient 机制说明
+
+`content_enhancement/llm_client.py` 提供统一的大模型调用封装：
+
+- 自动读取环境变量 `OPENAI_API_KEY`、`OPENAI_BASE_URL`，无需在代码中硬编码。
+- 调用失败或未配置 API Key 时，将自动降级为本地模式，所有请求返回空结果。
+- 模块集成方式：
+  - `EntityDetailAnalyzer` 动态从 LLM 获取实体属性模板；若返回为空则使用默认硬编码模板。
+  - `GlobalAnalyzer` 动态获取动词/因果关键词；若返回为空则使用默认集合。
+- 内置缓存 (`functools.lru_cache`) 避免重复请求，降低成本。
+
+### 2.2 运行单元测试
+
+项目在 `tests/` 目录下提供了基础单元测试，验证 LLM 集成与回退逻辑：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+如需在 CI 中运行，可直接执行以上命令，无需外部依赖（测试使用 MockLLMClient）。
+
 ### 3. 启动服务器
 
 ```bash

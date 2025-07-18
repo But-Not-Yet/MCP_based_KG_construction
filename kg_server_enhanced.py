@@ -77,10 +77,11 @@ async def handle_list_tools() -> list[Tool]:
     """
     列出可用的工具
     """
+    # 直接构建知识图谱不进行增强，用于对比实验
     tools = [
         Tool(
             name="build_knowledge_graph",
-            description="全自动构建知识图谱：自动评估数据质量、补全知识、构建图谱并生成可视化",
+            description="构建知识图谱：直接从文本提取实体与关系并生成可视化（不进行内容增强）",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -99,7 +100,7 @@ async def handle_list_tools() -> list[Tool]:
         )
     ]
     
-    # 如果分析模块可用，添加高级分析工具
+    # 如果分析模块可用，添加高级分析工具，对文本进行分析，提供高质量评估和改进建议
     if ANALYSIS_AVAILABLE:
         tools.append(
             Tool(
@@ -162,7 +163,7 @@ async def handle_list_tools() -> list[Tool]:
                         "auto_enhance": {
                             "type": "boolean",
                             "description": "是否自动增强知识图谱",
-                            "default": True
+                            "default": False
                         }
                     },
                     "required": ["text"]
@@ -190,7 +191,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
 async def build_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextContent]:
     """
-    原有的知识图谱构建工具（保持不变）
+    构建知识图谱（不进行质量评估、知识补全或其他内容增强）
     """
     try:
         text = arguments.get("text", "")
@@ -207,25 +208,8 @@ async def build_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCont
 
         start_time = time.time()
 
-        # 阶段1：数据质量评估
-        quality_result = await quality_assessor.assess_quality(text)
-
-        # 阶段2：知识补全（如果需要）
-        processed_text = text
-        completion_info = {"skipped": True, "reason": "数据质量良好"}
-
-        if not quality_result["is_high_quality"]:
-            completion_result = await knowledge_completor.complete_knowledge(text, quality_result)
-            processed_text = completion_result["enhanced_data"]
-            completion_info = {
-                "skipped": False,
-                "completions": completion_result["completions"],
-                "corrections": completion_result["corrections"],
-                "confidence": completion_result["confidence"]
-            }
-
-        # 阶段3：知识图谱构建
-        kg_result = await kg_builder.build_graph(processed_text, use_llm=True)
+        # 直接构建知识图谱
+        kg_result = await kg_builder.build_graph(text, use_llm=True)
 
         # 检查是否成功提取到实体和三元组
         if not kg_result["entities"] and not kg_result["triples"]:
@@ -238,7 +222,7 @@ async def build_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCont
                 }, ensure_ascii=False, indent=2)
             )]
 
-        # 阶段4：生成可视化
+        # 生成可视化
         visualization_file = kg_visualizer.save_simple_visualization(
             kg_result["triples"],
             kg_result["entities"],
@@ -258,41 +242,18 @@ async def build_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCont
             "success": True,
             "input_text": text,
             "processing_time": round(processing_time, 3),
-            "stages": {
-                "quality_assessment": {
-                    "quality_score": quality_result["quality_score"],
-                    "is_high_quality": quality_result["is_high_quality"],
-                    "completeness": quality_result["completeness"],
-                    "consistency": quality_result["consistency"],
-                    "relevance": quality_result["relevance"],
-                    "issues": quality_result["issues"],
-                    "recommendation": quality_result["recommendation"]
-                },
-                "knowledge_completion": completion_info,
-                "knowledge_graph": {
-                    "entities_count": len(kg_result["entities"]),
-                    "relations_count": len(kg_result["relations"]),
-                    "triples_count": len(kg_result["triples"]),
-                    "entities": kg_result["entities"],
-                    "relations": kg_result["relations"],
-                    "average_confidence": sum(kg_result["confidence_scores"]) / len(kg_result["confidence_scores"]) if kg_result["confidence_scores"] else 0
-                },
-                "visualization": {
-                    "file_path": visualization_file,
-                    "file_url": visualization_url,
-                    "http_url": http_url,
-                    "server_info": server_info
-                }
+            "knowledge_graph": {
+                "entities_count": len(kg_result["entities"]),
+                "relations_count": len(kg_result["relations"]),
+                "triples_count": len(kg_result["triples"]),
+                "entities": kg_result["entities"],
+                "relations": kg_result["relations"]
             },
-            "summary": {
-                "original_text": text,
-                "processed_text": processed_text,
-                "quality_improved": not quality_result["is_high_quality"],
-                "final_entities": len(kg_result["entities"]),
-                "final_triples": len(kg_result["triples"]),
-                "visualization_ready": True,
-                "visualization_file": visualization_file,
-                "visualization_url": visualization_url
+            "visualization": {
+                "file_path": visualization_file,
+                "file_url": visualization_url,
+                "http_url": http_url,
+                "server_info": server_info
             }
         }
 
@@ -397,6 +358,7 @@ async def analyze_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCo
                 "relations": kg_result["relations"]
             },
             "analysis_results": {
+                "llm_status": analysis_result.llm_status,
                 "timestamp": analysis_result.timestamp,
                 "quality_score": analysis_result.quality_metrics.get('overall_score', 0),
                 "total_issues": analysis_result.quality_metrics.get('issue_count', 0),
@@ -585,6 +547,7 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
                 },
                 "analysis_results": {
                     "analysis_enabled": enable_analysis,
+                    "llm_status": analysis_result.llm_status if analysis_result else "NOT_APPLICABLE",
                     "analysis_performed": analysis_result is not None,
                     "timestamp": analysis_result.timestamp if analysis_result else None,
                     "quality_score": analysis_result.quality_metrics.get('overall_score', 0) if analysis_result else None,
@@ -669,12 +632,12 @@ async def main():
                 notification_options=NotificationOptions(),
                 experimental_capabilities={}
             ),
+            timeoutSeconds=300  # 将默认超时从60秒延长到300秒
         )
         
         async with stdio_server() as (read_stream, write_stream):
             # 确保服务器完全初始化
-            print("⏳ 等待服务器完全初始化...")
-            await asyncio.sleep(0.5)  # 增加延迟确保初始化完成
+            await asyncio.sleep(3)  # 延长延迟，避免前端过早发送请求
             
             print("✅ 开始运行服务器...")
             await server.run(

@@ -8,6 +8,14 @@ Global Analysis Module for Knowledge Graph Quality Enhancement
 3. 事情逻辑/因果关系分析 → 实体间层次关系
 4. 节点直接逻辑关系分析 → 类别关系
 """
+from networkx.classes import selfloop_edges
+
+'''
+ todo:现在已经可以实现低质量文本RAG后构建知识图谱，但是需要对应的高质量数据，使用高质量数据构建对应的知识图谱后对比前后知识图谱的相似性
+'''
+#todo: 需要进行相似性对比的：不使用内容增强的低质量文本直接构建的知识图谱、高质量文本直接构建的知识图谱、低质量文本进行内容增强后构建的知识图谱
+
+
 
 import json
 import re
@@ -19,6 +27,12 @@ import networkx as nx
 from scipy.spatial.distance import cosine
 import jieba
 import jieba.posseg as pseg
+
+# 引入 LLMClient
+try:
+    from .llm_client import LLMClient
+except ImportError:
+    LLMClient = None  # type: ignore
 
 
 @dataclass
@@ -51,26 +65,43 @@ class AnalysisResult:
 
 class GlobalAnalyzer:
     """全局分析器主类"""
-    
-    def __init__(self):
+
+    def __init__(self, llm_client: Optional["LLMClient"] = None):
         self.entities: Dict[str, Entity] = {}
         self.relations: Dict[str, Relation] = {}
         self.graph = nx.DiGraph()
-        self.verb_keywords = self._load_verb_keywords()
-        self.causal_keywords = self._load_causal_keywords()
+
+        self.llm_client = llm_client
+
+        # 动态加载关键词，失败时回退默认
+        default_verbs = self._default_verb_keywords()
+        default_causals = self._default_causal_keywords()
+
+        if self.llm_client is not None:
+            verbs = self.llm_client.get_keywords("verb") or default_verbs
+            causals = self.llm_client.get_keywords("causal") or default_causals
+        else:
+            verbs = default_verbs
+            causals = default_causals
+
+        self.verb_keywords: Set[str] = set(verbs)
+        self.causal_keywords: Set[str] = set(causals)
+
+
         
-    def _load_verb_keywords(self) -> Set[str]:
-        """加载动词关键词"""
-        '''解决硬编码问题'''
+    # ---------------- 默认关键词（回退用） ----------------
+
+    @staticmethod
+    def _default_verb_keywords() -> Set[str]:
         return {
             '进行', '执行', '实现', '完成', '处理', '分析', '计算', '生成',
             '创建', '建立', '构建', '开发', '设计', '制作', '产生', '形成',
             '发生', '出现', '存在', '包含', '具有', '拥有', '展示', '显示',
             '导致', '引起', '造成', '促使', '推动', '影响', '改变', '转换'
         }
-    
-    def _load_causal_keywords(self) -> Set[str]:
-        """加载因果关系关键词"""
+
+    @staticmethod
+    def _default_causal_keywords() -> Set[str]:
         return {
             '因为', '由于', '因此', '所以', '导致', '引起', '造成', '促使',
             '结果', '原因', '后果', '影响', '作用', '效果', '产生', '形成',

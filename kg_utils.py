@@ -1,4 +1,4 @@
-# kg_utils.py - 纯LLM版本（移除所有硬编码）
+# kg_utils.py - LLM版本
 
 import json
 import re
@@ -33,7 +33,7 @@ class ChineseEntityRelationExtractor:
     """纯LLM中文实体抽取与关系抽取"""
     
     def __init__(self, api_key):
-        self.api_key = api_key  # 修复：使用传入的API密钥
+        self.api_key = api_key  # 模型是否需要跟env相同（取决于模型的实体和关系抽取能力）
         self.base_url = "https://api.siliconflow.cn/v1/chat/completions"
         self.model = "Qwen/Qwen2.5-7B-Instruct"
         
@@ -144,66 +144,175 @@ iPhone|Product
         return triplets
 
 
+class LLMJsonExtractor:
+    """从LLM提取JSON的工具"""
+
+    def __init__(self, api_key: str, model_name: str = "deepseek-chat"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.base_url = "https://api.siliconflow.cn/v1/chat/completions"
+        self.model = "Qwen/Qwen2.5-7B-Instruct"
+        if not api_key:
+            raise ValueError("API key must be provided for LLMJsonExtractor")
+
+        # Check for custom base URL for self-hosted models
+        # base_url = os.getenv("OPENAI_BASE_URL") # This line was removed as per the new_code, as it's not in the new_code.
+        # if base_url:
+        #     openai.api_base = base_url
+
+    async def _call_llm_api(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """调用Silicon Flow API"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 800
+        }
+        
+        try:
+            response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if "choices" in result and len(result["choices"]) > 0:
+                    return result["choices"][0]["message"]["content"]
+            else:
+                print(f"❌ API调用失败: HTTP {response.status_code}")
+                return None
+            
+        except Exception as e:
+            print(f"❌ API调用失败: {e}")
+            return None
+    
+    async def extract_entities_and_types(self, text):
+        """同时提取实体和类型"""
+        prompt = f"""
+Please extract entities from the following Chinese text and label the type of each entity.
+Text: "{text}"
+Please output in the following format, one entity per line:
+Entity Name|Entity Type
+Entity types include: Person, Organization, Location, Product, Event, Other
+Example format:
+张三|Person
+阿里巴巴|Organization
+北京|Location
+iPhone|Product
+"""
+        
+        response = await self._call_llm_api(prompt)
+        if response:
+            entities = {}
+            lines = response.strip().split('\n')
+            for line in lines:
+                if '|' in line:
+                    parts = line.split('|')
+                    if len(parts) >= 2:
+                        entity = parts[0].strip()
+                        entity_type = parts[1].strip()
+                        if entity:
+                            entities[entity] = entity_type
+            return entities
+        return {}
+
+    async def extract_triplets(self, text):
+        """提取三元组"""
+        prompt = f"""
+Please extract entity relationship triplets from the following Chinese text.
+Text: "{text}"
+Please strictly follow the format below, with one triplet per line:
+(Head Entity,Relation,Tail Entity)
+Requirements:
+1. Head and tail entities must be explicitly mentioned in the text.
+2. The relation should accurately describe the relationship between the two entities.
+3. Only output confirmed relationships, do not guess.
+4. Output only one triplet per line.
+Example:
+(张三,担任,CEO)
+(阿里巴巴,总部位于,杭州)
+"""
+        
+        response = await self._call_llm_api(prompt)
+        if response:
+            return self.parse_triplets(response)
+        return []
+    
+    def parse_triplets(self, response):
+        """解析三元组"""
+        triplets = []
+        lines = response.strip().split('\n')
+        
+        for line in lines:
+            # 匹配格式：(头实体,关系,尾实体)
+            match = re.search(r'\(([^,]+),\s*([^,]+),\s*([^)]+)\)', line)
+            if match:
+                head = match.group(1).strip()
+                relation = match.group(2).strip()
+                tail = match.group(3).strip()
+                if head and relation and tail:
+                    triplets.append((head, relation, tail))
+        
+        return triplets
+
+
 class PureLLMKnowledgeGraphBuilder:
     """纯LLM知识图谱构建器（无硬编码规则）"""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.entities = set()
-        self.relations = set()
-        self.triples = []
-        self.entity_types = {}
-        
-        # 初始化LLM抽取器
-        self.llm_extractor = None
-        if api_key:
-            self.llm_extractor = ChineseEntityRelationExtractor(api_key)
-        else:
-            print("⚠️  警告：未提供API密钥，无法使用LLM功能")
+    def __init__(self, api_key: str, model_name: str = "deepseek-chat"):
+        self.llm_extractor = LLMJsonExtractor(api_key, model_name)
+        self.entity_types: Dict[str, str] = {}
+        # 添加一个简单的无效实体名称集合
+        self.invalid_entity_names = {"", "_", " "}
 
-    async def build_graph(self, data: str, use_llm: bool = True) -> Dict[str, Any]:
+    def _is_valid_entity(self, entity_name: str) -> bool:
+        """检查实体名称是否有效"""
+        if not entity_name or not entity_name.strip():
+            return False
+        if entity_name in self.invalid_entity_names:
+            return False
+        # 过滤掉纯数字或过短的（除非是专有名词，但这里做简化）
+        if entity_name.isdigit() and len(entity_name) < 4:
+            return False
+        # 过滤掉特殊字符
+        if not re.search(r'\w', entity_name):  # 至少包含一个字母或数字
+            return False
+        return True
+
+    async def build_graph(self, text: str, use_llm: bool = True) -> Dict[str, Any]:
         """
-        构建知识图谱（纯LLM版本）
-        
+        使用LLM构建知识图谱
         Args:
-            data: 输入文本
+            text: 输入文本
             use_llm: 必须为True，纯LLM版本不支持规则模式
-        
         Returns:
-            知识图谱构建结果
+            知识图谱数据
         """
         if not use_llm:
             print("⚠️  纯LLM版本不支持规则模式，自动启用LLM模式")
-        
-        if not self.llm_extractor:
-            print("❌ 未配置API密钥，无法构建知识图谱")
-            return {
-                "entities": [],
-                "relations": [],
-                "triples": [],
-                "confidence_scores": []
-            }
 
-        print("🤖 使用纯LLM模式构建知识图谱...")
-        
         # 使用LLM提取所有信息
-        entities_with_types = self.llm_extractor.extract_entities_and_types(data)
-        llm_triplets = self.llm_extractor.extract_triplets(data)
-        
+        entities_with_types = await self.llm_extractor.extract_entities_and_types(text)
+        llm_triplets = await self.llm_extractor.extract_triplets(text)
+
         # 处理实体
         entities = list(entities_with_types.keys())
         self.entity_types = entities_with_types
-        
+
         # 处理三元组
         triples = []
         relations = set()
-        
+
         for head, relation, tail in llm_triplets:
             # 计算置信度
-            confidence = self._calculate_llm_confidence(data, head, relation, tail)
+            confidence = self._calculate_llm_confidence(text, head, relation, tail)
             triple = Triple(head, relation, tail, confidence)
             triples.append(triple)
             relations.add(relation)
-            
+
             # 确保实体被包含
             if head not in entities:
                 entities.append(head)
@@ -214,26 +323,32 @@ class PureLLMKnowledgeGraphBuilder:
 
         # 去重和合并
         triples = self._merge_duplicate_triples(triples)
-        
+
         # 计算置信度
         confidence_scores = [triple.confidence for triple in triples]
-
-        # 更新内部状态
-        self.entities.update(entities)
-        self.relations.update(relations)
-        self.triples.extend(triples)
-
-        print(f"✅ 提取完成：{len(entities)}个实体，{len(relations)}个关系，{len(triples)}个三元组")
+        
+        # 应用过滤器
+        final_entities = [e for e in entities if self._is_valid_entity(e)]
+        
+        final_triples = [
+            t for t in triples 
+            if self._is_valid_entity(t.head) and 
+               self._is_valid_entity(t.tail) and 
+               self._is_valid_entity(t.relation)
+        ]
+        
+        final_relations = list(set(t.relation for t in final_triples))
+        final_confidence_scores = [t.confidence for t in final_triples]
 
         return {
-            "entities": entities,
-            "relations": list(relations),
-            "triples": triples,
-            "confidence_scores": confidence_scores
+            "entities": final_entities,
+            "relations": final_relations,
+            "triples": final_triples,
+            "confidence_scores": final_confidence_scores
         }
 
     def _calculate_llm_confidence(self, data: str, head: str, relation: str, tail: str) -> float:
-        """计算LLM三元组置信度 - 动态计算，避免硬编码"""
+        """计算LLM三元组置信度"""
         confidence = 0.5  # 基础置信度降低
         
         # 1. 实体在原文中的位置和频率
