@@ -1,5 +1,10 @@
 # entity_detail_analyzer.py
 
+
+
+#todo 周末任务：1. 实现逻辑分析（紫色模块）；2. 预留质量分析部分方便将调研结果插入；3. 数据寻找；4. 图谱质量分析到内容增强的循环迭代的实现
+
+
 import re
 from typing import Dict, List, Any, Set, Tuple, Optional
 from dataclasses import dataclass

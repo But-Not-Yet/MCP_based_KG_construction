@@ -103,22 +103,24 @@ iPhone|Product
     def extract_triplets(self, text):
         """提取三元组"""
         prompt = f"""
-请从以下中文文本中抽取实体关系三元组。
+请从以下中文文本中，严格按照 "头实体, 关系, 尾实体" 的格式，抽取所有实体关系三元组。
 
 文本："{text}"
 
-请严格按照以下格式输出，每行一个三元组：
-(头实体,关系,尾实体)
+你的任务是识别出句子中的主语（头实体）、谓语（关系）和宾语（尾实体）。
+- 关系应该是描述性的动词或短语。
+- 实体应是具体的名词或名词短语。
+- 只输出文本中明确存在或可以强力推断的关系。
 
-要求：
-1. 头实体和尾实体必须是文本中明确出现的
-2. 关系要准确描述两个实体之间的关系
-3. 只输出确定的关系，不要猜测
-4. 每行只输出一个三元组
+请严格按照以下格式输出，每行一个三元
+- (头实体, 关系, 尾实体)
 
-示例：
-(张三,担任,CEO)
-(阿里巴巴,总部位于,杭州)
+示例输入: "北京市中国的首都，也是一座历史悠久的文化名城。"
+示例输出:
+(北京, 是, 中国的首都)
+(北京, 位于, 中国)
+
+现在，请处理上面的文本。
 """
         
         response = self.call_api(prompt)
@@ -272,13 +274,13 @@ class PureLLMKnowledgeGraphBuilder:
         """检查实体名称是否有效"""
         if not entity_name or not entity_name.strip():
             return False
-        if entity_name in self.invalid_entity_names:
+        if entity_name.lower() in self.invalid_entity_names:
             return False
-        # 过滤掉纯数字或过短的（除非是专有名词，但这里做简化）
+        # 过滤掉纯数字且长度较短的
         if entity_name.isdigit() and len(entity_name) < 4:
             return False
-        # 过滤掉特殊字符
-        if not re.search(r'\w', entity_name):  # 至少包含一个字母或数字
+        # **关键修复**: 允许中文字符。检查是否至少包含一个字母、数字或中文字符。
+        if not re.search(r'[\u4e00-\u9fa5a-zA-Z0-9]', entity_name):
             return False
         return True
 

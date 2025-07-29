@@ -20,6 +20,7 @@ import logging
 from .global_analysis import GlobalAnalyzer, AnalysisResult
 from .entity_detail_analyzer import EntityDetailAnalyzer, AttributeGap
 from .llm_client import LLMClient
+from .logic_analyzer import LogicAnalyzer
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +58,7 @@ class AnalysisOutput:
     input_summary: Dict[str, Any]
     global_analysis_results: Optional[Dict[str, Any]] = None
     detail_analysis_results: Optional[Dict[str, Any]] = None
+    logic_analysis_results: Optional[Dict[str, Any]] = None  # 新增
     integrated_recommendations: List[Dict[str, Any]] = None
     quality_metrics: Dict[str, float] = None
     llm_status: str = "UNKNOWN"
@@ -73,6 +75,7 @@ class AnalysisPipeline:
 
         self.global_analyzer = GlobalAnalyzer(llm_client=self.llm_client)
         self.detail_analyzer = EntityDetailAnalyzer(llm_client=self.llm_client)
+        self.logic_analyzer = LogicAnalyzer(llm_client=self.llm_client)  # 新增
         
         logger.info(f"分析流程控制器初始化完成，配置: {self.config}")
     
@@ -143,21 +146,30 @@ class AnalysisPipeline:
         if self.config.enable_detail_analysis:
             tasks.append(self._run_detail_analysis(processed_data))
         
+        # 添加逻辑分析任务
+        tasks.append(self._run_logic_analysis(processed_data))
+        
         # 并行执行
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # 处理结果
         analysis_results = {}
+        task_index = 0
         if self.config.enable_global_analysis:
-            analysis_results['global'] = results[0] if not isinstance(results[0], Exception) else None
-            if isinstance(results[0], Exception):
-                logger.error(f"全局分析出错: {results[0]}")
+            analysis_results['global'] = results[task_index] if not isinstance(results[task_index], Exception) else None
+            if isinstance(results[task_index], Exception):
+                logger.error(f"全局分析出错: {results[task_index]}")
+            task_index += 1
         
         if self.config.enable_detail_analysis:
-            detail_index = 1 if self.config.enable_global_analysis else 0
-            analysis_results['detail'] = results[detail_index] if not isinstance(results[detail_index], Exception) else None
-            if isinstance(results[detail_index], Exception):
-                logger.error(f"细节分析出错: {results[detail_index]}")
+            analysis_results['detail'] = results[task_index] if not isinstance(results[task_index], Exception) else None
+            if isinstance(results[task_index], Exception):
+                logger.error(f"细节分析出错: {results[task_index]}")
+            task_index += 1
+
+        analysis_results['logic'] = results[task_index] if not isinstance(results[task_index], Exception) else None
+        if isinstance(results[task_index], Exception):
+            logger.error(f"逻辑分析出错: {results[task_index]}")
         
         return analysis_results
     
@@ -218,6 +230,17 @@ class AnalysisPipeline:
         logger.info(f"细节分析完成，发现{len(results.get('attribute_gaps', []))}个属性缺失")
         return results
     
+    async def _run_logic_analysis(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
+        """执行逻辑分析"""
+        logger.info("执行逻辑分析...")
+        results = await self.logic_analyzer.analyze_with_agent(
+            processed_data['original_text'],
+            processed_data['entities'],
+            processed_data['relations']
+        )
+        logger.info(f"逻辑分析完成，发现{len(results.get('findings', []))}个潜在逻辑问题。")
+        return results
+    
     def _integrate_results(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """整合分析结果"""
         logger.info("整合分析结果...")
@@ -244,6 +267,11 @@ class AnalysisPipeline:
         if analysis_results.get('detail'):
             detail_recommendations = self._extract_detail_recommendations(analysis_results['detail'])
             integrated['all_recommendations'].extend(detail_recommendations)
+
+        # 新增：整合逻辑分析结果
+        if analysis_results.get('logic'):
+            logic_recommendations = self._extract_logic_recommendations(analysis_results['logic'])
+            integrated['all_recommendations'].extend(logic_recommendations)
         
         # 按优先级排序和筛选
         integrated['priority_recommendations'] = self._prioritize_recommendations(
@@ -296,6 +324,22 @@ class AnalysisPipeline:
         
         return recommendations
     
+    def _extract_logic_recommendations(self, logic_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """提取逻辑分析建议"""
+        recommendations = []
+        for finding in logic_results.get('findings', []):
+            recommendations.append({
+                'source': 'logic_analysis',
+                'module': 'agent_reasoning',
+                'type': finding.get('type', 'Unknown_Logic_Finding'),
+                'description': finding.get('description', ''),
+                'priority': self._calculate_priority_from_confidence(finding.get('confidence', 0.5)),
+                'confidence': finding.get('confidence', 0.5),
+                'implementation': finding,
+                'category': '逻辑推理'
+            })
+        return recommendations
+
     def _prioritize_recommendations(self, recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """按优先级排序建议"""
         # 优先级排序规则
@@ -369,6 +413,7 @@ class AnalysisPipeline:
             },
             global_analysis_results=analysis_results.get('global'),
             detail_analysis_results=analysis_results.get('detail'),
+            logic_analysis_results=analysis_results.get('logic'), # 新增
             integrated_recommendations=integrated_results.get('priority_recommendations', []),
             quality_metrics={
                 'overall_score': integrated_results.get('quality_score', 0.0),
@@ -446,9 +491,14 @@ class AnalysisPipeline:
     
     def _calculate_priority(self, recommendation: Dict[str, Any], confidence: float) -> str:
         """计算建议优先级"""
+        # This is now a wrapper, but can be extended
+        return self._calculate_priority_from_confidence(confidence)
+
+    def _calculate_priority_from_confidence(self, confidence: float) -> str:
+        """根据置信度计算优先级"""
         if confidence >= 0.8:
             return '高'
-        elif confidence >= 0.6:
+        elif confidence >= 0.5:
             return '中'
         else:
             return '低'

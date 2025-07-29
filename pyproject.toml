@@ -18,4 +18,5 @@ dependencies = [
     "requests>=2.31.0",
     "scipy>=1.16.0",
     "jieba>=0.42.1",
+    "datasets>=4.0.0",
 ]

@@ -45,14 +45,14 @@ try:
     from content_enhancement.analysis_pipeline import analyze_knowledge_graph, AnalysisConfig
     from content_enhancement.enhancement_executor import EnhancementExecutor
     ANALYSIS_AVAILABLE = True
-    print("✅ 分析模块加载成功")
+    print("分析模块加载成功")
 except ImportError as e:
     ANALYSIS_AVAILABLE = False
-    print(f"❌ 分析模块加载失败: {e}")
+    print(f"分析模块加载失败: {e}")
     print("高级分析功能将不可用")
 except Exception as e:
     ANALYSIS_AVAILABLE = False
-    print(f"❌ 分析模块初始化错误: {e}")
+    print(f"分析模块初始化错误: {e}")
     print("高级分析功能将不可用")
 
 # 全局组件
@@ -63,9 +63,9 @@ try:
     kg_visualizer = KnowledgeGraphVisualizer()
     if ANALYSIS_AVAILABLE:
         enhancement_executor = EnhancementExecutor()
-    print("✅ 核心组件初始化成功")
+    print("核心组件初始化成功")
 except Exception as e:
-    print(f"❌ 核心组件初始化失败: {e}")
+    print(f"核心组件初始化失败: {e}")
     raise
 
 # 创建服务器实例
@@ -485,18 +485,32 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
         final_triples = kg_result["triples"]
 
         if auto_enhance and analysis_result:
+            # 确保传递的是结构化的实体和关系列表
             enhancement_result = await enhancement_executor.execute_enhancements(
-                processed_text, kg_result["entities"], kg_result["relations"], kg_result["triples"], analysis_result
+                processed_text, entities, relations, analysis_result
             )
 
             # 使用增强后的数据
             final_entities = [e['name'] for e in enhancement_result.enhanced_entities]
             final_relations = [r['name'] for r in enhancement_result.enhanced_relations]
 
+            # 重新计算摘要以获得准确的“原始”与“增强”对比
+            enhancement_summary = {
+                'status': 'Completed',
+                'original_entity_count': len(kg_result["entities"]),
+                'enhanced_entity_count': len(final_entities),
+                'original_relation_count': len(kg_result["triples"]),
+                'enhanced_relation_count': len(enhancement_result.enhanced_triples),
+                'applied_enhancements_count': len(enhancement_result.applied_enhancements)
+            }
+            enhancement_result.enhancement_summary = enhancement_summary
+
+
             # 构建增强后的三元组用于可视化
             enhanced_triples = []
+            # Triple 对象是 kg_utils 中定义的，需要从 enhanced_triples (dict) 转换
+            from kg_utils import Triple
             for triple_dict in enhancement_result.enhanced_triples:
-                from kg_utils import Triple
                 enhanced_triple = Triple(
                     head=triple_dict['head'],
                     relation=triple_dict['relation'],

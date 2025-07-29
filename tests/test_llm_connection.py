@@ -11,7 +11,7 @@ try:
 except Exception as e:
     print(f"⚠️  加载 .env 文件失败: {e}")
 
-
+# 勾八就放两周够干嘛的，两周还一大堆事，无敌了，算下来睡觉的时间都不一定有
 # 从环境变量中读取配置
 API_KEY = os.getenv("OPENAI_API_KEY")
 BASE_URL = os.getenv("BASE_URL")
@@ -34,6 +34,9 @@ def test_connection():
         print("❌ 错误: 环境变量 OPENAI_API_KEY 未设置。")
         print("   请在 .env 文件中添加 OPENAI_API_KEY=your_api_key_here")
         return
+
+
+
 
     try:
         # --- API 调用（兼容新旧版本） ---
