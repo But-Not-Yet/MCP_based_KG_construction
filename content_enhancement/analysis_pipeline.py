@@ -58,8 +58,8 @@ class AnalysisOutput:
     input_summary: Dict[str, Any]
     global_analysis_results: Optional[Dict[str, Any]] = None
     detail_analysis_results: Optional[Dict[str, Any]] = None
-    logic_analysis_results: Optional[Dict[str, Any]] = None  # 新增
-    integrated_recommendations: List[Dict[str, Any]] = None
+    enhancement_plan: Optional[Dict[str, Any]] = None  # 从 logic_analysis_results 重命名
+    integrated_recommendations: List[Dict[str, Any]] = None # 这个字段未来可能被废弃
     quality_metrics: Dict[str, float] = None
     llm_status: str = "UNKNOWN"
 
@@ -232,60 +232,49 @@ class AnalysisPipeline:
     
     async def _run_logic_analysis(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
         """执行逻辑分析"""
-        logger.info("执行逻辑分析...")
+        logger.info("执行逻辑分析 (生成增强方案)...")
         results = await self.logic_analyzer.analyze_with_agent(
             processed_data['original_text'],
             processed_data['entities'],
             processed_data['relations']
         )
-        logger.info(f"逻辑分析完成，发现{len(results.get('findings', []))}个潜在逻辑问题。")
+        logger.info(f"逻辑分析完成，生成了 {len(results.get('enhancements', []))} 条增强指令。")
         return results
     
     def _integrate_results(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """整合分析结果"""
         logger.info("整合分析结果...")
         
-        integrated = {
-            'priority_recommendations': [],
-            'all_recommendations': [],
-            'issue_summary': {
-                'critical_issues': 0,
-                'major_issues': 0,
-                'minor_issues': 0,
-                'total_issues': 0
-            },
-            'enhancement_opportunities': [],
-            'quality_score': 0.0
-        }
-        
-        # 整合全局分析结果
+        # 注意：这里的 'integrated_recommendations' 概念被弱化了。
+        # 核心的增强逻辑现在由 enhancement_plan 驱动。
+        # 这里的 all_recommendations 更多是用于日志和统计。
+        all_recommendations = []
         if analysis_results.get('global'):
-            global_recommendations = self._extract_global_recommendations(analysis_results['global'])
-            integrated['all_recommendations'].extend(global_recommendations)
-        
-        # 整合细节分析结果
+            all_recommendations.extend(self._extract_global_recommendations(analysis_results['global']))
         if analysis_results.get('detail'):
-            detail_recommendations = self._extract_detail_recommendations(analysis_results['detail'])
-            integrated['all_recommendations'].extend(detail_recommendations)
-
-        # 新增：整合逻辑分析结果
+            all_recommendations.extend(self._extract_detail_recommendations(analysis_results['detail']))
         if analysis_results.get('logic'):
-            logic_recommendations = self._extract_logic_recommendations(analysis_results['logic'])
-            integrated['all_recommendations'].extend(logic_recommendations)
+             all_recommendations.extend(self._extract_logic_recommendations(analysis_results['logic']))
         
+        # 直接透传 enhancement_plan
+        enhancement_plan = analysis_results.get('logic', {})
+
         # 按优先级排序和筛选
-        integrated['priority_recommendations'] = self._prioritize_recommendations(
-            integrated['all_recommendations']
+        integrated_recommendations = self._prioritize_recommendations(
+            all_recommendations
         )
         
         # 计算质量评分
-        integrated['quality_score'] = self._calculate_quality_score(analysis_results)
+        integrated_results = {
+            'priority_recommendations': integrated_recommendations,
+            'all_recommendations': all_recommendations, # 保留所有建议用于日志
+            'enhancement_plan': enhancement_plan,
+            'quality_score': self._calculate_quality_score(analysis_results),
+            'issue_summary': self._generate_issue_summary(all_recommendations)
+        }
         
-        # 生成问题摘要
-        integrated['issue_summary'] = self._generate_issue_summary(integrated['all_recommendations'])
-        
-        logger.info(f"结果整合完成，共{len(integrated['all_recommendations'])}个建议")
-        return integrated
+        logger.info(f"结果整合完成，共{len(integrated_recommendations)}个优先级建议")
+        return integrated_results
     
     def _extract_global_recommendations(self, global_results: Dict[str, AnalysisResult]) -> List[Dict[str, Any]]:
         """提取全局分析建议"""
@@ -327,15 +316,15 @@ class AnalysisPipeline:
     def _extract_logic_recommendations(self, logic_results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """提取逻辑分析建议"""
         recommendations = []
-        for finding in logic_results.get('findings', []):
+        for enh in logic_results.get('enhancements', []):
             recommendations.append({
                 'source': 'logic_analysis',
                 'module': 'agent_reasoning',
-                'type': finding.get('type', 'Unknown_Logic_Finding'),
-                'description': finding.get('description', ''),
-                'priority': self._calculate_priority_from_confidence(finding.get('confidence', 0.5)),
-                'confidence': finding.get('confidence', 0.5),
-                'implementation': finding,
+                'type': enh.get('type', 'LOGIC_ENHANCEMENT'),
+                'description': enh.get('description', ''),
+                'priority': self._calculate_priority_from_confidence(enh.get('confidence', 0.5)),
+                'confidence': enh.get('confidence', 0.5),
+                'implementation': enh,  # 包含 actions 列表
                 'category': '逻辑推理'
             })
         return recommendations
@@ -413,7 +402,7 @@ class AnalysisPipeline:
             },
             global_analysis_results=analysis_results.get('global'),
             detail_analysis_results=analysis_results.get('detail'),
-            logic_analysis_results=analysis_results.get('logic'), # 新增
+            enhancement_plan=analysis_results.get('logic'), # 使用新字段
             integrated_recommendations=integrated_results.get('priority_recommendations', []),
             quality_metrics={
                 'overall_score': integrated_results.get('quality_score', 0.0),
@@ -422,7 +411,6 @@ class AnalysisPipeline:
             }
         )
         
-        # Add LLM status to the output
         if self.llm_client:
             output.llm_status = "OPERATIONAL" if self.llm_client.is_operational else "DEGRADED (check API key/environment variables)"
 
@@ -475,7 +463,7 @@ class AnalysisPipeline:
             effect = recommendation.get('effect', '')
             return f"添加因果关系: {cause} → {effect}"
         else:
-            return recommendation.get('description', str(recommendation))
+            return str(recommendation)
     
     def _categorize_recommendation(self, recommendation: Dict[str, Any]) -> str:
         """分类建议"""

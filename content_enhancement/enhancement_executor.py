@@ -58,12 +58,16 @@ class EnhancementExecutor:
         if hasattr(analysis_result, 'integrated_recommendations'):
             recommendations = analysis_result.integrated_recommendations
             
-            for rec in recommendations:
-                enhancement = await self._apply_recommendation(
-                    rec, enhanced_entities, enhanced_triples, original_text
-                )
-                if enhancement:
-                    applied_enhancements.append(enhancement)
+            # --- 并发优化 ---
+            tasks = [
+                self._apply_recommendation(rec, enhanced_entities, enhanced_triples, original_text)
+                for rec in recommendations
+            ]
+            
+            if tasks:
+                enhancement_results = await asyncio.gather(*tasks)
+                applied_enhancements = [res for res in enhancement_results if res is not None]
+            # --- 优化结束 ---
         
         # **关键修复**：从最终的三元组列表重建实体和关系
         final_entities, final_relations = self._rebuild_from_triples(enhanced_triples, enhanced_entities)
@@ -110,45 +114,79 @@ class EnhancementExecutor:
                                   enhanced_entities: List[Dict[str, Any]],
                                   enhanced_triples: List[Dict[str, Any]],
                                   original_text: str) -> Optional[Dict[str, Any]]:
-        """应用单个建议（简化版）"""
-        # (此处的具体实现可以根据需要进一步细化，目前主要依赖逻辑分析)
+        """应用单个建议"""
         category = recommendation.get('category')
-        if category == '逻辑推理':
-            return await self._apply_logic_suggestion(recommendation, enhanced_triples)
         
-        # 移除了过于激进的 'similar_entity_relation' 关系补全逻辑
-        # 其他更精确的建议类型可以在此添加处理分支
+        # --- 核心重构: 直接执行逻辑分析器的增强计划 ---
+        if category == '逻辑推理':
+            return self._apply_logic_enhancement_plan(recommendation, enhanced_triples)
+        
+        # (其他类型的建议可以在此添加处理分支)
         
         return None
 
-    async def _apply_logic_suggestion(self,
-                                    recommendation: Dict[str, Any],
-                                    enhanced_triples: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """应用逻辑分析建议，调用LLM生成新三元组"""
-        if not self.llm_client or not self.llm_client.is_operational:
+    def _apply_logic_enhancement_plan(self,
+                                        recommendation: Dict[str, Any],
+                                        enhanced_triples: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        直接解析并应用来自 LogicAnalyzer 的增强计划（actions）。
+        不再调用 LLM。
+        """
+        # 'implementation' 字段包含了原始的增强指令
+        implementation_plan = recommendation.get('implementation', {})
+        actions = implementation_plan.get('actions', [])
+        
+        if not actions:
             return None
 
-        suggestion_text = recommendation.get('description', '')
-        # (构建prompt和调用LLM的逻辑与之前相同...)
-        prompt = f"""
-你是一个知识图谱构建助手。请将下面的增强建议转化为一个或多个具体的三元组。
-增强建议: {suggestion_text}
-严格以JSON格式返回一个列表，例如: `[{{"head": "A", "relation": "导致", "tail": "B"}}]`
-如果无法生成，返回空列表 `[]`。
-"""
-        response_text = self.llm_client.custom_query(prompt)
-        new_triples_data = self.llm_client._clean_and_parse_json(response_text, "apply_logic_suggestion")
+        applied_count = 0
+        
+        for instruction in actions:
+            action_type = instruction.get('action')
+            triple_data = instruction.get('triple')
+            
+            if not action_type or not triple_data:
+                continue
 
-        if new_triples_data and isinstance(new_triples_data, list):
-            added_count = 0
-            for triple_data in new_triples_data:
-                if all(k in triple_data for k in ["head", "relation", "tail"]):
-                    new_triple = {**triple_data, 'confidence': recommendation.get('confidence', 0.8), 'enhanced': True, 'source': 'logic_analysis'}
-                    if new_triple not in enhanced_triples:
-                        enhanced_triples.append(new_triple)
-                        added_count += 1
-            if added_count > 0:
-                return recommendation
+            # 确保三元组是标准格式
+            target_triple = {
+                "head": triple_data.get('head'),
+                "relation": triple_data.get('relation'),
+                "tail": triple_data.get('tail')
+            }
+            # 清理 None 值，以防万一
+            target_triple = {k: v for k, v in target_triple.items() if v is not None}
+            
+            if len(target_triple) != 3:
+                continue
+
+            if action_type == 'add':
+                # 为确保幂等性，只有当三元组不存在时才添加
+                found = False
+                for t in enhanced_triples:
+                    if t['head'] == target_triple['head'] and t['relation'] == target_triple['relation'] and t['tail'] == target_triple['tail']:
+                        found = True
+                        break
+                if not found:
+                    enhanced_triples.append({**target_triple, 'confidence': recommendation.get('confidence', 0.95), 'enhanced': True, 'source': 'logic_analysis'})
+                    applied_count += 1
+            
+            elif action_type == 'remove':
+                # 从列表中移除所有匹配的三元组
+                original_count = len(enhanced_triples)
+                # 我们需要比较核心的 head, relation, tail，忽略 confidence 等
+                enhanced_triples[:] = [t for t in enhanced_triples if not (
+                    t['head'] == target_triple['head'] and 
+                    t['relation'] == target_triple['relation'] and 
+                    t['tail'] == target_triple['tail']
+                )]
+                if len(enhanced_triples) < original_count:
+                    applied_count += (original_count - len(enhanced_triples))
+
+        if applied_count > 0:
+            logger.info(f"成功应用了 {applied_count} 个来自逻辑分析的增强操作。")
+            return recommendation  # 返回被应用的建议，用于统计
+
         return None
 
     def _generate_enhancement_summary(self, 

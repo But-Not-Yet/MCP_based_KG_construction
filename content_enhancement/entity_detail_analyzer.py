@@ -259,11 +259,20 @@ class EntityDetailAnalyzer:
         if entity_type in self.attribute_templates:
             template = self.attribute_templates[entity_type]
             for attr_name, pattern in template.attribute_patterns.items():
+                # --- 健壮性修复 ---
+                if not pattern or not isinstance(pattern, str):
+                    continue  # 跳过无效的 pattern
+                # --- 修复结束 ---
+                
                 # 在实体附近查找属性
                 entity_context = self._get_entity_context(entity_name, text, window=50)
-                matches = re.findall(pattern, entity_context)
-                if matches:
-                    attributes[attr_name] = matches[0] if isinstance(matches[0], str) else matches[0][0]
+                try:
+                    matches = re.findall(pattern, entity_context)
+                    if matches:
+                        attributes[attr_name] = matches[0] if isinstance(matches[0], str) else matches[0][0]
+                except re.error as e:
+                    # logger.warning(f"正则表达式错误，实体: {entity_name}, 属性: {attr_name}, 模式: {pattern}, 错误: {e}") # Original code had this line commented out
+                    continue # 正则表达式本身有误，跳过
         
         return attributes
 

@@ -10,8 +10,9 @@ import json
 import time
 import sys
 import os
-from typing import Any, Sequence
+from typing import Any, Sequence, Dict
 from dotenv import load_dotenv
+from dataclasses import asdict
 
 # 加载环境变量
 load_dotenv()
@@ -33,6 +34,7 @@ from mcp.types import (
     EmbeddedResource,
     LoggingLevel
 )
+from dataclasses import asdict # 确保 asdict 被导入
 
 # 原有模块
 from data_quality import DataQualityAssessor
@@ -44,6 +46,7 @@ from kg_visualizer import KnowledgeGraphVisualizer
 try:
     from content_enhancement.analysis_pipeline import analyze_knowledge_graph, AnalysisConfig
     from content_enhancement.enhancement_executor import EnhancementExecutor
+    from kg_utils import Triple # 确保 Triple 被导入
     ANALYSIS_AVAILABLE = True
     print("分析模块加载成功")
 except ImportError as e:
@@ -170,6 +173,28 @@ async def handle_list_tools() -> list[Tool]:
                 }
             )
         )
+        
+        tools.append(
+            Tool(
+                name="process_text_file_to_cypher",
+                description="批量处理文本文件，提取三元组并生成 Neo4j Cypher 脚本",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "包含待处理文本的输入文件路径（.txt）"
+                        },
+                        "output_file": {
+                            "type": "string",
+                            "description": "Cypher脚本的输出文件名（可选）",
+                            "default": "neo4j_import.cypher"
+                        }
+                    },
+                    "required": ["input_file"]
+                }
+            )
+        )
     
     return tools
 
@@ -185,6 +210,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         return await analyze_knowledge_graph_tool(arguments)
     elif name == "build_and_analyze_kg" and ANALYSIS_AVAILABLE:
         return await build_and_analyze_kg_tool(arguments)
+    elif name == "process_text_file_to_cypher" and ANALYSIS_AVAILABLE:
+        return await process_text_file_to_cypher_tool(arguments)
     else:
         raise ValueError(f"未知工具: {name}")
 
@@ -273,6 +300,124 @@ async def build_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextCont
                 "error_details": error_details
             }, ensure_ascii=False, indent=2)
         )]
+
+
+def _generate_cypher_script(triples: Sequence[Dict[str, Any]]) -> str:
+    """将三元组字典列表转换为 Neo4j Cypher MERGE 语句"""
+    if not triples:
+        return "# 无可导入的三元组。\n"
+
+    nodes = set()
+    for t in triples:
+        nodes.add(t['head'])
+        nodes.add(t['tail'])
+
+    cypher_statements = []
+
+    # MERGE nodes
+    cypher_statements.append("// --- 1. 创建或匹配节点 ---")
+    for node in sorted(list(nodes)):
+        # 正确处理带引号的节点名称
+        node_escaped = node.replace("'", "\\'")
+        cypher_statements.append(f"MERGE (:`Entity` {{name: '{node_escaped}'}});")
+
+    # 创建索引以加速合并
+    cypher_statements.append("\n// --- 2. 创建索引以加速 ---")
+    cypher_statements.append("CREATE INDEX IF NOT EXISTS FOR (n:Entity) ON (n.name);")
+    
+    # MERGE relationships
+    cypher_statements.append("\n// --- 3. 创建或匹配关系 ---")
+    for t in triples:
+        head = t['head'].replace("'", "\\'")
+        tail = t['tail'].replace("'", "\\'")
+        # 将关系中的非字母数字字符替换为下划线，以符合Cypher标准
+        relation_type = ''.join(c if c.isalnum() else '_' for c in t['relation']).upper()
+        if not relation_type:  # 避免空关系类型
+            relation_type = "RELATED_TO"
+        
+        cypher_statements.append(
+            f"MATCH (h:`Entity` {{name: '{head}'}}), (t:`Entity` {{name: '{tail}'}}) "
+            f"MERGE (h)-[:`{relation_type}`]->(t);"
+        )
+
+    return "\n".join(cypher_statements)
+
+
+async def process_text_file_to_cypher_tool(arguments: dict[str, Any]) -> list[TextContent]:
+    """
+    批量处理文本文件并生成 Cypher 脚本的工具
+    """
+    try:
+        input_file = arguments.get("input_file")
+        output_file = arguments.get("output_file", "neo4j_import.cypher")
+
+        if not input_file or not os.path.exists(input_file):
+            return [TextContent(text=json.dumps({"success": False, "error": f"输入文件不存在: {input_file}"}, ensure_ascii=False))]
+
+        with open(input_file, 'r', encoding='utf-8') as f:
+            lines = [line.strip().split('\t', 1)[-1] for line in f if line.strip()]
+
+        if not lines:
+            return [TextContent(text=json.dumps({"success": False, "error": "输入文件为空或格式不正确"}, ensure_ascii=False))]
+
+        start_time = time.time()
+        
+        # 并发处理每一行
+        tasks = [build_and_analyze_kg_tool({"text": line, "auto_enhance": True, "output_file": "off"}) for line in lines]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_triples = []
+        processed_lines = 0
+        failed_lines = 0
+
+        for res in results:
+            if isinstance(res, Exception) or not res:
+                failed_lines += 1
+                continue
+            
+            try:
+                data = json.loads(res[0].text)
+                if data.get("success"):
+                    processed_lines += 1
+                    # 从 summary 中提取 final_triples
+                    summary = data.get("summary", {})
+                    triples_from_summary = summary.get("final_triples", [])
+                    if triples_from_summary:
+                        all_triples.extend(triples_from_summary)
+                else:
+                    failed_lines += 1
+            except (json.JSONDecodeError, IndexError):
+                failed_lines += 1
+
+        # 使用去重确保三元组唯一性
+        unique_triples = [dict(t) for t in {tuple(d.items()) for d in all_triples}]
+
+        cypher_script = _generate_cypher_script(unique_triples)
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(cypher_script)
+
+        processing_time = time.time() - start_time
+
+        result_summary = {
+            "success": True,
+            "processing_time": round(processing_time, 3),
+            "total_lines": len(lines),
+            "processed_lines": processed_lines,
+            "failed_lines": failed_lines,
+            "total_triples_generated": len(unique_triples),
+            "cypher_script_file": os.path.abspath(output_file)
+        }
+        
+        return [TextContent(text=json.dumps(result_summary, ensure_ascii=False, indent=2))]
+
+    except Exception as e:
+        import traceback
+        return [TextContent(text=json.dumps({
+            "success": False, 
+            "error": str(e),
+            "error_details": traceback.format_exc()
+        }, ensure_ascii=False, indent=2))]
 
 
 async def analyze_knowledge_graph_tool(arguments: dict[str, Any]) -> list[TextContent]:
@@ -522,16 +667,27 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
             final_triples = enhanced_triples
 
         # 阶段6：生成可视化
-        visualization_file = kg_visualizer.save_simple_visualization(
-            final_triples,
-            final_entities,
-            final_relations,
-            output_file
-        )
+        if output_file != "off":
+            visualization_file = kg_visualizer.save_simple_visualization(
+                final_triples,
+                final_entities,
+                final_relations,
+                output_file
+            )
+            abs_path = os.path.abspath(visualization_file)
+            visualization_url = f"file:///{abs_path.replace(os.sep, '/')}"
+            http_url = f"http://localhost:8000/{visualization_file}"
+            viz_info = {
+                "file_path": visualization_file,
+                "file_url": visualization_url,
+                "http_url": http_url,
+                "server_info": f"可手动启动HTTP服务器访问：在项目目录运行 'python -m http.server 8000'，然后访问 {http_url}"
+            }
+        else:
+            visualization_file = "off"
+            visualization_url = "off"
+            viz_info = {"status": "Visualization disabled"}
 
-        abs_path = os.path.abspath(visualization_file)
-        visualization_url = f"file:///{abs_path.replace(os.sep, '/')}"
-        http_url = f"http://localhost:8000/{visualization_file}"
 
         processing_time = time.time() - start_time
 
@@ -579,12 +735,7 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
                     "final_relations_count": len(final_relations),
                     "final_triples_count": len(final_triples)
                 },
-                "visualization": {
-                    "file_path": visualization_file,
-                    "file_url": visualization_url,
-                    "http_url": http_url,
-                    "server_info": f"可手动启动HTTP服务器访问：在项目目录运行 'python -m http.server 8000'，然后访问 {http_url}"
-                }
+                "visualization": viz_info
             },
             "summary": {
                 "original_text": text,
@@ -594,8 +745,8 @@ async def build_and_analyze_kg_tool(arguments: dict[str, Any]) -> list[TextConte
                 "enhancement_applied": enhancement_result is not None,
                 "final_entities": len(final_entities),
                 "final_relations": len(final_relations),
-                "final_triples": len(final_triples),
-                "visualization_ready": True,
+                "final_triples": [asdict(t) for t in final_triples],
+                "visualization_ready": visualization_file != "off",
                 "visualization_file": visualization_file,
                 "visualization_url": visualization_url
             }

@@ -22,13 +22,15 @@ import os
 import time
 import re  # 导入正则表达式模块
 from functools import lru_cache
+import asyncio # 引入 asyncio
 
 try:
     import openai
-    from openai import OpenAI
+    from openai import OpenAI, AsyncOpenAI # 导入 AsyncOpenAI
 except ImportError:
     openai = None
     OpenAI = None
+    AsyncOpenAI = None
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,16 @@ class LLMClient:
             logger.warning("未在环境变量中找到 OPENAI_API_KEY，LLMClient 将处于降级模式。")
         else:
             self.is_operational = True
+            try:
+                self.async_client = AsyncOpenAI( # 初始化异步客户端
+                    api_key=self.config.api_key,
+                    base_url=self.config.base_url,
+                    timeout=self.config.timeout,
+                )
+            except TypeError:
+                 self.async_client = None # 兼容旧版本
+                 logger.warning("无法初始化 AsyncOpenAI，异步功能将不可用。请检查 openai 库版本。")
+
             logger.info(f"LLMClient 已配置。模型: {self.config.model}, Base URL: {self.config.base_url or '默认'}")
 
     def _chat_completion(self, prompt: str, temperature: float = 0.2, **kwargs) -> str:
@@ -90,6 +102,29 @@ class LLMClient:
                 logger.warning("LLM 请求失败 (第 %s 次), %s秒后重试. 错误: %s", retry + 1, sleep_time, exc)
                 time.sleep(sleep_time)
         logger.error("LLM 请求多次失败后放弃。")
+        return ""
+
+    async def _achat_completion(self, prompt: str, temperature: float = 0.2, **kwargs) -> str:
+        """异步与大语言模型交互。"""
+        if not self.is_operational or not self.async_client:
+            return ""
+
+        for retry in range(self.config.max_retries):
+            try:
+                response = await self.async_client.chat.completions.create(
+                    model=self.config.model,
+                    messages=[
+                        {"role": "system", "content": "你是一个知识图谱专家，回答需 JSON"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=temperature,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as exc:
+                sleep_time = 2 ** retry
+                logger.warning("异步 LLM 请求失败 (第 %s 次), %s秒后重试. 错误: %s", retry + 1, sleep_time, exc)
+                await asyncio.sleep(sleep_time)
+        logger.error("异步 LLM 请求多次失败后放弃。")
         return ""
 
     def _clean_and_parse_json(self, response_text: str, context: str = "") -> Any:
@@ -159,4 +194,8 @@ class LLMClient:
     # --------------------- 自定义钩子/扩展 ------------------------------
     def custom_query(self, prompt: str, **kwargs) -> str:
         """向 LLM 发送自定义 prompt，返回文本。"""
-        return self._chat_completion(prompt, **kwargs) 
+        return self._chat_completion(prompt, **kwargs)
+
+    async def acustom_query(self, prompt: str, **kwargs) -> str:
+        """异步向 LLM 发送自定义 prompt，返回文本。"""
+        return await self._achat_completion(prompt, **kwargs) 

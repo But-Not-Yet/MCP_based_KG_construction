@@ -296,9 +296,12 @@ class PureLLMKnowledgeGraphBuilder:
         if not use_llm:
             print("⚠️  纯LLM版本不支持规则模式，自动启用LLM模式")
 
-        # 使用LLM提取所有信息
-        entities_with_types = await self.llm_extractor.extract_entities_and_types(text)
-        llm_triplets = await self.llm_extractor.extract_triplets(text)
+        # **性能优化**: 并行执行实体和三元组的提取
+        entities_task = self.llm_extractor.extract_entities_and_types(text)
+        triplets_task = self.llm_extractor.extract_triplets(text)
+
+        results = await asyncio.gather(entities_task, triplets_task)
+        entities_with_types, llm_triplets = results[0], results[1]
 
         # 处理实体
         entities = list(entities_with_types.keys())

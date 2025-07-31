@@ -21,15 +21,12 @@ class LogicAnalyzer:
         """
         构建用于AI智能体推理的提示。
         """
-        # 为了提示的简洁性，对实体和关系进行格式化
-        formatted_entities = [f"- {e.get('name')} (类型: {e.get('type', '未知')})" for e in entities]
-        formatted_relations = [f"- ({r.get('source')}, {r.get('name')}, {r.get('target')})" for r in relations]
+        # --- 最终修复: 使用最标准的 \n.join() 确保健壮性 ---
+        formatted_entities = "\n".join([f"- {e.get('name')} (类型: {e.get('type', '未知')})" for e in entities]) if entities else "(无实体被抽取)"
+        formatted_relations = "\n".join([f"- ({r.get('source')}, {r.get('name')}, {r.get('target')})" for r in relations]) if relations else "(无关系被抽取)"
 
         prompt = f"""
-你是一个高度智能的“知识图谱推理智能体”。你的任务是分析下面提供的原始文本和已抽取的知识图谱片段，
-进行深度的逻辑推理，以发现其中隐藏的、缺失的或可以推断出的信息。
-
-不要重复已有的事实，你的目标是找出那些需要“思考”才能发现的知识。
+你是一个严谨的知识图谱事实核查与优化专家。你的任务是基于你的世界知识和逻辑推理能力，审查一个从文本中抽取的知识图谱片段，然后提供一个可直接执行的“增强方案”。
 
 ---
 ### 原始文本:
@@ -38,71 +35,82 @@ class LogicAnalyzer:
 ```
 
 ---
-### 已抽取的知识图谱:
+### 已抽取的知识图谱 (待审查):
 #### 实体:
-{chr(10).join(formatted_entities)}
+{formatted_entities}
 
 #### 关系:
-{chr(10).join(formatted_relations)}
+{formatted_relations}
 
 ---
-### 你的推理任务:
-1.  **隐含关系推断**: 基于上下文和你的世界知识，如果两个实体在没有明确动词的情况下共同出现，它们之间最可能存在什么关系？(例如: "微软, 比尔·盖茨" 暗示 `(比尔·盖茨, 创立, 微软)`; "北京, 中国" 暗示 `(北京, 位于, 中国)`)。这是最高优先级的任务。
-2.  **因果链推理**: 如果 A 导致 B，B 导致 C，那么 A 和 C 之间是否存在间接的因果关系？
-3.  **传递关系推断**: 如果 A 是 B 的一部分，B 是 C 的一部分，那么 A 和 C 是什么关系？
-4.  **缺失角色分析**: 一个事件发生了，但它的“执行者”或“影响对象”在图中缺失了吗？
-5.  **逻辑矛盾检测**: 是否存在逻辑上相互矛盾的关系？（例如：A 是 B 的父公司，同时 B 又是 A 的父公司）
-6.  **反事实推断**: 如果某个条件不成立，可能会发生什么？（例如：如果“安全系统”未部署，可能会导致什么后果？）
+### 你的核心任务:
+1.  **事实核查 (Fact-Checking)**: 这是最高优先级的任务。请用你的世界知识，逐一审查上面“关系”列表中的每一条三元组，判断其是否事实正确。例如，`(陕西省, 位于, 西安中部)` 是事实错误的。
+2.  **隐含关系推断 (Implicit Inference)**: 根据文本和常识，补全实体间缺失的关键关系。例如，文本 "微软的比尔盖茨" 暗示了 `(比尔·盖茨, 创立, 微软)`。
+3.  **逻辑一致性检查**: 检查是否存在自相矛盾的关系，例如 `(A, 包含, B)` 和 `(B, 包含, A)` 不能同时成立。
 
 ---
 ### 输出格式:
-请严格以JSON格式返回你的发现。返回一个根对象，包含一个 `findings` 键，其值为一个列表。
-列表中的每个对象都应包含以下字段:
-- `type`: 字符串，你的发现类型 (例如: "Inferred_Transitive_Relation", "Missing_Event_Actor", "Logical_Inconsistency")。
-- `description`: 字符串，对你的发现进行详细的自然语言描述。
-- `evidence`: 列表，支撑你推理的证据，引用已抽取的实体或关系。
-- `suggestion`: 字符串，一个具体的增强建议 (例如: "添加关系 (A, '间接导致', C)")。
-- `confidence`: 浮点数，你对这个发现的置信度 (0.0到1.0)。
+请严格以JSON格式返回一个根对象，包含一个 `enhancements` 键，其值为一个列表。
+列表中的每个对象都是一个“增强指令”，包含以下字段:
+- `type`: 字符串，指令类型 (例如: "FACTUAL_CORRECTION", "IMPLICIT_RELATION_INFERENCE")。
+- `description`: 字符串，简要说明你做出此判断的理由。
+- `confidence`: 浮点数，你对这个指令的置信度 (0.0到1.0)。
+- `actions`: 一个操作列表，每个操作都是一个包含 "action" ("add" 或 "remove") 和 "triple" (一个包含 "head", "relation", "tail" 的对象) 的字典。
 
-如果没有任何发现，请返回 `{"findings": []}`。
+**示例:**
+对于输入文本 "陕西省位于西安中部"，你的输出应该是：
+```json
+{{
+  "enhancements": [
+    {{
+      "type": "FACTUAL_CORRECTION",
+      "description": "“陕西省位于西安中部”是错误的。西安是陕西省的省会，陕西省位于中国。",
+      "confidence": 0.99,
+      "actions": [
+        {{
+          "action": "remove",
+          "triple": {{"head": "陕西省", "relation": "位于", "tail": "西安中部"}}
+        }},
+        {{
+          "action": "add",
+          "triple": {{"head": "西安", "relation": "是省会", "tail": "陕西省"}}
+        }},
+        {{
+          "action": "add",
+          "triple": {{"head": "陕西省", "relation": "位于", "tail": "中国"}}
+        }}
+      ]
+    }}
+  ]
+}}
+```
 
-现在，请开始你的推理。
+如果没有任何需要修改或补充的，请返回 `{{"enhancements": []}}`。现在，请开始你的分析和优化。
 """
         return prompt.strip()
 
     async def analyze_with_agent(self, original_text: str, entities: List[Dict], relations: List[Dict]) -> Dict[str, Any]:
         """
-        使用AI智能体进行分析，找出缺失的信息和关系。
-
-        Args:
-            original_text: 原始文本.
-            entities: 已抽取的实体列表.
-            relations: 已抽取的关系列表.
-
-        Returns:
-            一个包含推理结果的字典。
+        使用AI智能体进行分析，直接生成增强方案。
         """
         if not self.llm_client:
-            return {"findings": []}
+            return {"enhancements": []}
 
         prompt = self._build_agent_prompt(original_text, entities, relations)
         
-        # 这里我们直接使用封装好的LLMClient的custom_query
-        # 因为我们需要它返回一个可以被解析为JSON的字符串
-        response_text = self.llm_client.custom_query(prompt, temperature=0.3)
+        response_text = await self.llm_client.acustom_query(prompt, temperature=0.1)
 
         if not response_text:
             logger.warning("逻辑分析智能体未能从LLM返回任何内容。")
-            return {"findings": []}
+            return {"enhancements": []}
 
-        # 使用已有的清理和解析函数
         analysis_result = self.llm_client._clean_and_parse_json(response_text, context="LogicAnalyzer")
 
-        if analysis_result and "findings" in analysis_result and isinstance(analysis_result["findings"], list):
+        if analysis_result and "enhancements" in analysis_result and isinstance(analysis_result["enhancements"], list):
             return analysis_result
         else:
             logger.warning(f"逻辑分析智能体返回的格式不正确或为空。返回内容: {response_text[:200]}...")
-            return {"findings": []}
+            return {"enhancements": []}
 
 """
 # 使用示例

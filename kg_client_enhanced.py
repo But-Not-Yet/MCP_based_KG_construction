@@ -26,8 +26,8 @@ class EnhancedKGClient:
     async def connect_to_server(self):
         """连接到增强版知识图谱服务器"""
         server_params = StdioServerParameters(
-            command='uv',
-            args=['run', 'kg_server_enhanced.py'],
+            command='python',
+            args=['kg_server_enhanced.py'],
             env=os.environ
         )
 
@@ -57,6 +57,20 @@ class EnhancedKGClient:
             return json.loads(result_text)
         except Exception as e:
             logging.error(f"调用 build_and_analyze_kg 工具时出错: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def process_file_to_cypher(self, file_path: str) -> dict:
+        """
+        调用服务器的 process_text_file_to_cypher 工具来批量处理文件。
+        """
+        try:
+            result = await self.session.call_tool("process_text_file_to_cypher", {
+                "input_file": file_path
+            })
+            result_text = result.content[0].text
+            return json.loads(result_text)
+        except Exception as e:
+            logging.error(f"调用 process_text_file_to_cypher 工具时出错: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
     def display_result(self, result: dict):
@@ -93,24 +107,57 @@ class EnhancedKGClient:
         else:
             print("\n🎨 未生成可视化文件。")
 
+    def display_batch_result(self, result: dict):
+        """显示批量处理的结果"""
+        if not result.get("success"):
+            print(f"\n❌ 批量处理失败: {result.get('error', '未知错误')}")
+            if 'error_details' in result:
+                print("\n--- 错误详情 ---")
+                print(result['error_details'])
+                print("-----------------")
+            return
+
+        print("\n✅ 批量处理成功!")
+        print(f"⏱️  处理时间: {result.get('processing_time', 'N/A'):.3f} 秒")
+        print("\n--- 处理摘要 ---")
+        print(f"  总行数: {result.get('total_lines', 'N/A')}")
+        print(f"  成功处理行数: {result.get('processed_lines', 'N/A')}")
+        print(f"  失败行数: {result.get('failed_lines', 'N/A')}")
+        print(f"  生成三元组总数: {result.get('total_triples_generated', 'N/A')}")
+        
+        cypher_file = result.get('cypher_script_file')
+        if cypher_file:
+            print(f"\n🚀 Cypher 脚本已生成: {cypher_file}")
+            print("   您可以将此文件内容复制到 Neo4j Browser 中运行以导入图谱。")
+        else:
+            print("\n❌ 未能生成 Cypher 脚本文件。")
+
+
     async def interactive_mode(self):
         """交互式模式"""
-        print("\n🎯 增强版知识图谱客户端 (构建并自动增强模式)")
-        print("   - 输入任意文本以构建和增强知识图谱。")
+        print("\n🎯 增强版知识图谱客户端")
+        print("   - 输入任意文本，构建并增强知识图谱。")
+        print("   - 输入 .txt 文件路径 (例如: data/processed_dataset/news_sports.txt)，批量处理并生成Cypher脚本。")
         print("   - 输入 'quit' 退出。")
         print("=" * 50)
 
         while True:
             try:
-                text = input("\n📝 请输入文本: ").strip()
-                if text.lower() == 'quit':
+                user_input = input("\n📝 请输入文本或文件路径: ").strip()
+                if user_input.lower() == 'quit':
                     break
-                if not text:
+                if not user_input:
                     continue
 
-                print("\n🔄 正在构建并增强知识图谱，请稍候...")
-                result = await self.build_and_enhance_kg(text)
-                self.display_result(result)
+                # 判断是文件路径还是普通文本
+                if user_input.lower().endswith('.txt') and os.path.exists(user_input):
+                    print(f"\n🔄 检测到文件路径，开始批量处理 '{user_input}'...")
+                    result = await self.process_file_to_cypher(user_input)
+                    self.display_batch_result(result)
+                else:
+                    print("\n🔄 正在构建并增强知识图谱，请稍候...")
+                    result = await self.build_and_enhance_kg(user_input)
+                    self.display_result(result)
 
             except (KeyboardInterrupt, EOFError):
                 print("\n\n👋 再见!")
