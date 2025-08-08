@@ -2,7 +2,7 @@
 
 这是一个基于 MCP (Model Context Protocol) 的升级版知识图谱构建系统，实现了三阶段的数据处理流水线：数据质量评估、知识补全和知识图谱构建。
 
-## 🎯 系统特性
+## 系统特性
 
 ### 三阶段处理流程
 
@@ -24,7 +24,7 @@
    - 置信度计算
    - 交互式可视化
 
-## 📁 文件结构
+## 文件结构
 
 ```
 kg_server.py    # 主要的 MCP 服务器
@@ -35,7 +35,7 @@ kg_client.py                # 测试客户端
 kg_visualizer.py             # 可视化工具
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 安装依赖
 
@@ -52,6 +52,27 @@ OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.deepseek.com  # 或其他API端点
 OPENAI_MODEL=deepseek-chat
 ```
+
+### 2.1 LLMClient 机制说明
+
+`content_enhancement/llm_client.py` 提供统一的大模型调用封装：
+
+- 自动读取环境变量 `OPENAI_API_KEY`、`OPENAI_BASE_URL`，无需在代码中硬编码。
+- 调用失败或未配置 API Key 时，将自动降级为本地模式，所有请求返回空结果。
+- 模块集成方式：
+  - `EntityDetailAnalyzer` 动态从 LLM 获取实体属性模板；若返回为空则使用默认硬编码模板。
+  - `GlobalAnalyzer` 动态获取动词/因果关键词；若返回为空则使用默认集合。
+- 内置缓存 (`functools.lru_cache`) 避免重复请求，降低成本。
+
+### 2.2 运行单元测试
+
+项目在 `tests/` 目录下提供了基础单元测试，验证 LLM 集成与回退逻辑：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+如需在 CI 中运行，可直接执行以上命令，无需外部依赖（测试使用 MockLLMClient）。
 
 ### 3. 启动服务器
 
@@ -145,7 +166,7 @@ c. 使用主流MCP工具运行（如Cursor、Cherry Studio等）
 **返回：**
 - 图谱统计信息（JSON格式）
 
-## 📊 使用示例
+## 使用示例
 
 ### 示例1：高质量数据
 ```
@@ -176,7 +197,7 @@ c. 使用主流MCP工具运行（如Cursor、Cherry Studio等）
 输出: 修正后的知识图谱
 ```
 
-## 🎨 扩展功能
+## 扩展功能
 
 ### 预留接口
 
@@ -201,7 +222,7 @@ c. 使用主流MCP工具运行（如Cursor、Cherry Studio等）
 - 相关性（Relevance）评估
 - 置信度计算
 
-## 🔍 技术特点
+## 技术特点
 
 1. **模块化设计**：各个组件独立，易于扩展和维护
 2. **异步处理**：支持高并发的数据处理
@@ -209,14 +230,14 @@ c. 使用主流MCP工具运行（如Cursor、Cherry Studio等）
 4. **错误处理**：完善的异常处理和错误恢复
 5. **统计分析**：提供详细的图谱统计信息
 
-## 📈 性能优化
+## 性能优化
 
 - 实体和关系的缓存机制
 - 三元组去重和合并
 - 批量处理支持
 - 内存优化的图谱存储
 
-## 🤝 贡献指南
+## 贡献指南
 
 1. Fork 项目
 2. 创建功能分支
@@ -224,11 +245,11 @@ c. 使用主流MCP工具运行（如Cursor、Cherry Studio等）
 4. 推送到分支
 5. 创建 Pull Request
 
-## 📄 许可证
+## 许可证
 
 MIT License
 
-## 🆘 故障排除
+## 故障排除
 
 ### 常见问题
 
@@ -249,6 +270,6 @@ MIT License
    uv sync --reinstall
    ```
 
-## 📞 联系方式
+## 联系方式
 
 如有问题或建议，请提交 Issue 或 Pull Request。

@@ -9,6 +9,9 @@ import math
 质量评估主要使用了三个主要的指标：完整性、一致性和相关性
 利用图谱世界知识判断常识性问题
 RAG
+
+结构性、完整性、一致性分析
+
 '''
 class DataQualityAssessor:
     """数据质量评估器"""
@@ -83,7 +86,21 @@ class DataQualityAssessor:
         score -= len(format_issues) * 0.1
         
         return max(score, 0.0)
+
+
+    '''
+    需要修改结构性分析的相关内容
     
+    def _assess_structure(self, data: str) -> float:
+        """结构性分析"""
+        score = 1.0
+        """结构性分析是放在图谱质量分析部分，也就是内容增强之后，分析内容"""
+        if self._contains_meaningless_content(data):
+            score -= 0.7
+        return max(score, 0.0)
+        
+    '''
+
     def _assess_relevance(self, data: str) -> float:
         """评估数据相关性"""
         # 简化的相关性评估
@@ -145,7 +162,11 @@ class DataQualityAssessor:
                 relations.append(pattern)
         
         return relations
-    
+
+
+    '''
+    是否需要通过外挂知识库进行实现
+    '''
     def _detect_semantic_conflicts(self, data: str) -> List[str]:
         """检测语义冲突"""
         conflicts = []

@@ -116,6 +116,7 @@ class KnowledgeGraphVisualizer:
 
         # 创建边的轨迹
         edge_traces = []
+        arrow_annotations = []
         edge_info = []
 
         for relation in relations:
@@ -138,6 +139,19 @@ class KnowledgeGraphVisualizer:
                         'text': f"{relation}<br>置信度: {edge[2]['confidence']:.3f}",
                         'relation': relation
                     })
+
+                    # 记录箭头 annotation
+                    arrow_annotations.append(
+                        go.layout.Annotation(
+                            ax=x0, ay=y0, x=x1, y=y1,
+                            xref='x', yref='y', axref='x', ayref='y',
+                            showarrow=True,
+                            arrowhead=3,
+                            arrowsize=1.5,
+                            arrowwidth=1,
+                            arrowcolor=self.relation_colors.get(relation, '#888')
+                        )
+                    )
 
             if edge_x:  # 只有当有边时才添加轨迹
                 edge_trace = go.Scatter(
@@ -228,9 +242,14 @@ class KnowledgeGraphVisualizer:
         if relation_trace:
             fig.add_trace(relation_trace)
 
-        # 更新布局
+        # 更新布局 - 使用专业模板
         layout_config = {
             'showlegend': True,
+            'annotations': [  # 预先定义一个注解列表
+                dict(text="拖拽节点可以移动 | 鼠标悬停查看详情 | 点击图例隐藏/显示关系", showarrow=False,
+                     xref="paper", yref="paper", x=0.005, y=-0.002, xanchor='left', yanchor='bottom',
+                     font=dict(size=12, color='gray'))
+            ],
             'hovermode': 'closest',
             'xaxis': dict(showgrid=False, zeroline=False, showticklabels=False),
             'yaxis': dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -245,26 +264,20 @@ class KnowledgeGraphVisualizer:
                     text=title,
                     x=0.5,
                     font=dict(size=20)
-                ),
-                'margin': dict(b=20, l=5, r=5, t=40),
-                'annotations': [
-                    dict(
-                        text="拖拽节点可以移动 | 鼠标悬停查看详情 | 点击图例隐藏/显示关系",
-                        showarrow=False,
-                        xref="paper", yref="paper",
-                        x=0.005, y=-0.002,
-                        xanchor='left', yanchor='bottom',
-                        font=dict(size=12, color='gray')
-                    )
-                ]
+                )
             })
         else:
             # 无标题模式，使用最小边距
             layout_config.update({
-                'margin': dict(b=5, l=5, r=5, t=5)
+                'margin': dict(b=10, l=10, r=10, t=10)
             })
 
         fig.update_layout(**layout_config)
+
+        # 合并箭头注解与已有注解
+        fig.update_layout(
+            annotations=fig.layout.annotations + tuple(arrow_annotations)
+        )
 
         return fig
 

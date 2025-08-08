@@ -2,7 +2,7 @@
 
 A fully automated knowledge graph construction system built on the Model Context Protocol (MCP), implementing a sophisticated 3-stage data processing pipeline for intelligent knowledge extraction and graph generation.
 
-## 🌟 Overview
+## Overview
 
 This project implements an advanced knowledge graph construction system that automatically processes raw text data through three intelligent stages:
 
@@ -12,14 +12,14 @@ This project implements an advanced knowledge graph construction system that aut
 
 The system is built on the MCP (Model Context Protocol) architecture, providing a clean client-server interface for seamless integration and scalability.
 
-## ✨ Key Features
+## Key Features
 
-### 🤖 Fully Automated Processing
+### Fully Automated Processing
 - **Zero Manual Intervention**: Automatically detects data quality and processing needs
 - **Intelligent Pipeline**: Adapts processing strategy based on input data characteristics
 - **Real-time Processing**: Immediate knowledge graph generation from raw text
 
-### 🔄 3-Stage Processing Pipeline
+### 3-Stage Processing Pipeline
 
 #### Stage 1: Data Quality Assessment
 - **Completeness Analysis**: Evaluates entity and relationship coverage
@@ -40,19 +40,19 @@ The system is built on the MCP (Model Context Protocol) architecture, providing 
 - **Confidence Scoring**: Assigns reliability scores to extracted knowledge
 - **Interactive Visualization**: Generates beautiful HTML visualizations
 
-### 🏗️ MCP Architecture
+### MCP Architecture
 - **Client-Server Design**: Clean separation of concerns
 - **Standardized Protocol**: Built on MCP for interoperability
 - **Tool-based Interface**: Modular, extensible tool system
 - **Async Processing**: High-performance asynchronous operations
 
-## 📋 Requirements
+## Requirements
 
 - **Python**: 3.11 or higher
 - **UV Package Manager**: For dependency management
 - **OpenAI-compatible API**: For LLM integration (DeepSeek, OpenAI, etc.)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone and Setup
 
@@ -179,7 +179,7 @@ async def main():
     await client.cleanup()
 ```
 
-## 📊 Example Outputs
+## Example Outputs
 
 ### High-Quality Input
 ```
@@ -211,7 +211,7 @@ Processing:
 Output: Corrected and enhanced knowledge graph
 ```
 
-## 🔧 MCP Tools API
+## MCP Tools API
 
 The system exposes the following MCP tools for integration:
 
@@ -247,7 +247,7 @@ The system exposes the following MCP tools for integration:
 }
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ├── kg_server.py              # Main MCP server implementation
@@ -270,7 +270,7 @@ The system exposes the following MCP tools for integration:
 - **`data_quality.py`**: Implements quality assessment algorithms for completeness, consistency, and relevance
 - **`knowledge_completion.py`**: Handles knowledge enhancement and conflict resolution
 
-## 🎯 Advanced Features
+## Advanced Features
 
 ### Quality Assessment Metrics
 - **Completeness Score**: Based on entity coverage and relationship density
@@ -290,7 +290,7 @@ The system exposes the following MCP tools for integration:
 - **Confidence Visualization**: Color-coded confidence levels
 - **Export Options**: HTML, PNG, SVG formats
 
-## 🔬 Technical Details
+## Technical Details
 
 ### Processing Pipeline
 1. **Input Validation**: Checks text format and encoding
@@ -306,7 +306,7 @@ The system exposes the following MCP tools for integration:
 - **Scalability**: Async architecture supports concurrent processing
 - **Accuracy**: 85-95% entity extraction, 80-90% relationship accuracy
 
-## 🚀 Development
+## Development
 
 ### Running Tests
 
@@ -347,14 +347,14 @@ VISUALIZATION_WIDTH=1200       # HTML visualization width
 VISUALIZATION_HEIGHT=800       # HTML visualization height
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature-name`
 3. Make your changes and test thoroughly
 4. Submit a pull request with detailed description
 
-## 🆘 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -375,18 +375,18 @@ VISUALIZATION_HEIGHT=800       # HTML visualization height
    uv sync --reinstall
    ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built on the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 - Visualization powered by [Plotly](https://plotly.com/)
 - Graph algorithms using [NetworkX](https://networkx.org/)
 - LLM integration via [OpenAI API](https://openai.com/api/)
 
-## 📞 Support
+## Support
 
 For questions, issues, or contributions:
 - 📧 Email: tzf9282003@163.com

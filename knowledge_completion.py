@@ -174,7 +174,7 @@ class DefaultKnowledgeBase:
 
             return {
                 "is_correct": is_correct,
-                "confidence": 0.95,
+                "confidence": 0.92 if is_correct else 0.88,  # 根据正确性动态调整
                 "correct_value": correct_country if not is_correct else object,
                 "correction_message": f"{subject}属于{correct_country}，不是{object}" if not is_correct else ""
             }
